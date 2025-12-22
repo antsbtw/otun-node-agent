@@ -161,14 +161,9 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 			SSPort:    ssPort,
 			SSMethod:  "chacha20-ietf-poly1305",
 		}
-		agent.localAPI = api.NewLocalAPIServer(agent.localStore, cfg.NodeAPIKey, nodeConfig, cfg.AllowedIPs)
+		agent.localAPI = api.NewLocalAPIServer(agent.localStore, cfg.NodeAPIKey, nodeConfig)
 
 		log.Printf("Local management API enabled")
-		if len(cfg.AllowedIPs) > 0 {
-			log.Printf("IP whitelist enabled: %v", cfg.AllowedIPs)
-		} else {
-			log.Printf("Warning: No IP whitelist configured, API is open to all IPs")
-		}
 		if cfg.ServerIP != "" {
 			log.Printf("Server IP: %s", cfg.ServerIP)
 		} else {

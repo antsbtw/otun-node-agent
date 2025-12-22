@@ -4,12 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"otun-node-agent/internal/local"
@@ -17,16 +14,9 @@ import (
 
 // LocalAPIServer 本地管理 API 服务
 type LocalAPIServer struct {
-	store        *local.Store
-	apiKey       string
-	nodeConfig   *NodeConfig
-
-	// IP 白名单（支持域名）
-	allowedHosts []string        // 原始配置（IP 或域名）
-	allowedIPs   map[string]bool // 解析后的 IP 白名单
-	allowAllIPs  bool            // 是否允许所有 IP（向后兼容）
-	ipMu         sync.RWMutex    // 保护 allowedIPs 的读写
-	stopCh       chan struct{}   // 停止 DNS 刷新
+	store      *local.Store
+	apiKey     string
+	nodeConfig *NodeConfig
 }
 
 // NodeConfig 节点配置信息
@@ -41,97 +31,12 @@ type NodeConfig struct {
 }
 
 // NewLocalAPIServer 创建本地 API 服务
-// allowedHosts: 允许访问的 IP 或域名列表，如果为空则允许所有 IP
-func NewLocalAPIServer(store *local.Store, apiKey string, nodeConfig *NodeConfig, allowedHosts []string) *LocalAPIServer {
-	server := &LocalAPIServer{
-		store:        store,
-		apiKey:       apiKey,
-		nodeConfig:   nodeConfig,
-		allowedHosts: make([]string, 0),
-		allowedIPs:   make(map[string]bool),
-		allowAllIPs:  len(allowedHosts) == 0,
-		stopCh:       make(chan struct{}),
+func NewLocalAPIServer(store *local.Store, apiKey string, nodeConfig *NodeConfig) *LocalAPIServer {
+	return &LocalAPIServer{
+		store:      store,
+		apiKey:     apiKey,
+		nodeConfig: nodeConfig,
 	}
-
-	// 保存原始配置
-	for _, host := range allowedHosts {
-		host = strings.TrimSpace(host)
-		if host != "" {
-			server.allowedHosts = append(server.allowedHosts, host)
-		}
-	}
-
-	// 立即解析一次
-	if !server.allowAllIPs {
-		server.refreshAllowedIPs()
-		// 启动定期 DNS 刷新（每 5 分钟）
-		go server.startDNSRefresh(5 * time.Minute)
-	}
-
-	return server
-}
-
-// refreshAllowedIPs 解析域名并更新 IP 白名单
-func (s *LocalAPIServer) refreshAllowedIPs() {
-	newIPs := make(map[string]bool)
-
-	for _, host := range s.allowedHosts {
-		// 检查是否是 IP 地址
-		if ip := net.ParseIP(host); ip != nil {
-			newIPs[host] = true
-			continue
-		}
-
-		// 是域名，进行 DNS 解析
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			log.Printf("[LocalAPI] Failed to resolve %s: %v", host, err)
-			continue
-		}
-
-		for _, ip := range ips {
-			ipStr := ip.String()
-			newIPs[ipStr] = true
-			log.Printf("[LocalAPI] Resolved %s -> %s", host, ipStr)
-		}
-	}
-
-	// 更新白名单
-	s.ipMu.Lock()
-	s.allowedIPs = newIPs
-	s.ipMu.Unlock()
-
-	log.Printf("[LocalAPI] IP whitelist updated: %d IPs from %d hosts", len(newIPs), len(s.allowedHosts))
-}
-
-// startDNSRefresh 定期刷新 DNS 解析
-func (s *LocalAPIServer) startDNSRefresh(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			s.refreshAllowedIPs()
-		case <-s.stopCh:
-			log.Println("[LocalAPI] DNS refresh stopped")
-			return
-		}
-	}
-}
-
-// Stop 停止服务（包括 DNS 刷新）
-func (s *LocalAPIServer) Stop() {
-	if s.stopCh != nil {
-		close(s.stopCh)
-	}
-}
-
-// isIPAllowed 检查 IP 是否在白名单中
-func (s *LocalAPIServer) isIPAllowed(ip string) bool {
-	s.ipMu.RLock()
-	defer s.ipMu.RUnlock()
-	return s.allowedIPs[ip]
 }
 
 // RegisterRoutes 注册路由到 mux
@@ -150,20 +55,9 @@ func (s *LocalAPIServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/local/circuit-breaker", s.authMiddleware(s.handleCircuitBreaker))
 }
 
-// authMiddleware Bearer Token 认证中间件 + IP 白名单检查
+// authMiddleware Bearer Token 认证中间件
 func (s *LocalAPIServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. IP 白名单检查
-		if !s.allowAllIPs {
-			clientIP := s.getClientIP(r)
-			if !s.isIPAllowed(clientIP) {
-				log.Printf("[LocalAPI] Blocked request from %s", clientIP)
-				s.jsonError(w, http.StatusForbidden, "ip not allowed")
-				return
-			}
-		}
-
-		// 2. Bearer Token 认证
 		auth := r.Header.Get("Authorization")
 		if auth == "" {
 			s.jsonError(w, http.StatusUnauthorized, "missing authorization header")
@@ -183,29 +77,6 @@ func (s *LocalAPIServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc 
 
 		next(w, r)
 	}
-}
-
-// getClientIP 获取客户端真实 IP
-func (s *LocalAPIServer) getClientIP(r *http.Request) string {
-	// 优先使用 X-Real-IP（如果经过反向代理）
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-
-	// 其次使用 X-Forwarded-For 的第一个 IP
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-
-	// 最后使用 RemoteAddr
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // handleUsers 处理 /api/local/users

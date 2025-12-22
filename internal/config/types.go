@@ -28,7 +28,6 @@ type AgentConfig struct {
 	LogLevel       string
 	ManagementMode ManagementMode // 管理模式
 	ServerIP       string         // 服务器公网 IP（用于生成连接 URL）
-	AllowedIPs     []string       // 允许访问本地 API 的 IP 白名单（为空则允许所有）
 }
 
 // User 是从管理服务器获取的用户信息

@@ -24,7 +24,6 @@ services:
       - NODE_ID=${NODE_ID:-node-default}
       - MANAGEMENT_MODE=${MANAGEMENT_MODE:-local}
       - SERVER_IP=${SERVER_IP:-}
-      - ALLOWED_IPS=${ALLOWED_IPS:-obox-subscription.situstechnologies.com,otun-manager.situstechnologies.com,obox-hosting.situstechnologies.com}
       - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
       - STATS_INTERVAL=${STATS_INTERVAL:-300}
       - VLESS_PORT=${VLESS_PORT:-443}

@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -27,26 +26,8 @@ func LoadFromEnv() *AgentConfig {
 		SingboxConfig:  getEnv("SINGBOX_CONFIG", "/etc/sing-box/config.json"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		ManagementMode: mode,
-		ServerIP:       getEnv("SERVER_IP", ""),           // 服务器公网 IP，用于生成连接 URL
-		AllowedIPs:     getStringSliceEnv("ALLOWED_IPS"), // 允许访问本地 API 的 IP/域名白名单
+		ServerIP:       getEnv("SERVER_IP", ""), // 服务器公网 IP，用于生成连接 URL
 	}
-}
-
-// getStringSliceEnv 从环境变量获取字符串列表（逗号分隔）
-func getStringSliceEnv(key string) []string {
-	val := os.Getenv(key)
-	if val == "" {
-		return nil
-	}
-	parts := strings.Split(val, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
 }
 
 func getEnv(key, defaultVal string) string {
