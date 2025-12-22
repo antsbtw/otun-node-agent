@@ -118,7 +118,7 @@ esac
 
 # 从 GitHub Release 下载预编译二进制文件
 # 这个二进制文件由项目维护者预编译，包含 with_v2ray_api,with_utls 标签
-SINGBOX_URL="https://github.com/antsbtw/sing-box-docker/releases/download/v${SINGBOX_VERSION}/sing-box-linux-${SINGBOX_ARCH}"
+SINGBOX_URL="https://github.com/antsbtw/otun-node-agent/releases/download/v${SINGBOX_VERSION}/sing-box-linux-${SINGBOX_ARCH}"
 
 echo -e "${YELLOW}Downloading sing-box v${SINGBOX_VERSION} for ${SINGBOX_ARCH}...${NC}"
 if ! curl -fsSL "$SINGBOX_URL" -o /usr/local/bin/sing-box; then
@@ -161,7 +161,7 @@ case $ARCH in
 esac
 
 # 从 GitHub Release 下载预编译的 agent
-AGENT_URL="https://github.com/antsbtw/sing-box-docker/releases/download/latest/agent-linux-${AGENT_ARCH}"
+AGENT_URL="https://github.com/antsbtw/otun-node-agent/releases/download/latest/agent-linux-${AGENT_ARCH}"
 
 echo -e "${YELLOW}Downloading agent for ${AGENT_ARCH}...${NC}"
 if curl -fsSL "$AGENT_URL" -o $INSTALL_DIR/agent; then
@@ -176,7 +176,7 @@ else
         git fetch origin
         git reset --hard origin/main
     else
-        git clone https://github.com/antsbtw/sing-box-docker.git repo
+        git clone https://github.com/antsbtw/otun-node-agent.git repo
         cd repo
     fi
 
