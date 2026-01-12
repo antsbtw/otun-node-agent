@@ -217,6 +217,13 @@ func (m *Manager) monitor() {
 		return
 	}
 
+	// 关键检查：如果当前 m.cmd 已经不是我们监控的那个，说明已经被 Reload 替换了
+	// 这种情况下不应该触发重启逻辑
+	if m.cmd != cmd {
+		log.Printf("monitor: cmd has been replaced, skipping restart logic")
+		return
+	}
+
 	wasRunning := m.running
 	m.running = false
 
