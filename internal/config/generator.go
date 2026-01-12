@@ -99,20 +99,19 @@ func (g *Generator) Generate(users []User, realitySNI string, circuitBreakerEnab
 	}
 	inbounds = append(inbounds, vlessInbound)
 
-	// Shadowsocks inbound - 始终创建
-	ssInbound := map[string]any{
-		"type":        "shadowsocks",
-		"tag":         "ss-in",
-		"listen":      "::",
-		"listen_port": g.ssPort,
-		"method":      "chacha20-ietf-poly1305",
-	}
+	// Shadowsocks inbound - 只在有用户时创建
+	// sing-box 的 Shadowsocks 要求必须有密码，空 users 数组会导致启动失败
 	if len(ssUsers) > 0 {
-		ssInbound["users"] = ssUsers
-	} else {
-		ssInbound["users"] = []map[string]any{}
+		ssInbound := map[string]any{
+			"type":        "shadowsocks",
+			"tag":         "ss-in",
+			"listen":      "::",
+			"listen_port": g.ssPort,
+			"method":      "chacha20-ietf-poly1305",
+			"users":       ssUsers,
+		}
+		inbounds = append(inbounds, ssInbound)
 	}
-	inbounds = append(inbounds, ssInbound)
 
 	config["inbounds"] = inbounds
 
