@@ -506,6 +506,9 @@ func (a *Agent) sendHeartbeat() {
 	// 获取连接数
 	connections, _ := a.connMgr.GetActiveConnections()
 
+	// 获取公网 IPv4 地址
+	publicIP := stats.GetPublicIPv4()
+
 	req := &config.HeartbeatRequest{
 		NodeID:    a.cfg.NodeID,
 		Timestamp: time.Now().UTC(),
@@ -515,6 +518,7 @@ func (a *Agent) sendHeartbeat() {
 			ActiveConnections: len(connections),
 			UserCount:         a.monitor.GetUserCount(),
 		},
+		PublicIP: publicIP,
 	}
 
 	resp, err := a.syncer.Heartbeat(req)

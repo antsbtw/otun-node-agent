@@ -2,10 +2,14 @@ package stats
 
 import (
 	"bufio"
+	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // SystemLoad 系统负载信息
@@ -90,4 +94,70 @@ func getMemoryUsage() float64 {
 
 	used := memTotal - memAvailable
 	return float64(used) / float64(memTotal) * 100
+}
+
+// IPv4 缓存
+var (
+	cachedIPv4     string
+	ipv4Mutex      sync.RWMutex
+	ipv4LastUpdate time.Time
+	ipv4CacheTTL   = 5 * time.Minute
+)
+
+// GetPublicIPv4 获取公网 IPv4 地址（带缓存，只返回 IPv4）
+func GetPublicIPv4() string {
+	ipv4Mutex.RLock()
+	if cachedIPv4 != "" && time.Since(ipv4LastUpdate) < ipv4CacheTTL {
+		ip := cachedIPv4
+		ipv4Mutex.RUnlock()
+		return ip
+	}
+	ipv4Mutex.RUnlock()
+
+	ip := fetchPublicIPv4()
+	if ip != "" {
+		ipv4Mutex.Lock()
+		cachedIPv4 = ip
+		ipv4LastUpdate = time.Now()
+		ipv4Mutex.Unlock()
+	}
+	return ip
+}
+
+// fetchPublicIPv4 从外部服务获取 IPv4 地址
+func fetchPublicIPv4() string {
+	// 只使用返回 IPv4 的服务
+	services := []string{
+		"https://api.ipify.org",      // 只返回 IPv4
+		"https://ipv4.icanhazip.com", // 强制 IPv4
+		"https://v4.ident.me",        // 强制 IPv4
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	for _, url := range services {
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		ip := strings.TrimSpace(string(body))
+		// 验证是 IPv4（包含点，不包含冒号）
+		if isIPv4(ip) {
+			return ip
+		}
+	}
+
+	return ""
+}
+
+// isIPv4 检查是否为 IPv4 地址
+func isIPv4(ip string) bool {
+	return len(ip) >= 7 && len(ip) <= 15 && strings.Contains(ip, ".") && !strings.Contains(ip, ":")
 }
