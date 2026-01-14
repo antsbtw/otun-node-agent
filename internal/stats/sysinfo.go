@@ -125,39 +125,69 @@ func GetPublicIP() string {
 	return ip
 }
 
-// fetchPublicIP 从外部服务获取公网 IP
+// fetchPublicIP 从外部服务获取公网 IP（优先 IPv4）
 func fetchPublicIP() string {
-	services := []string{
+	// 优先使用只返回 IPv4 的服务
+	ipv4Services := []string{
+		"https://api.ipify.org",      // 只返回 IPv4
+		"https://ipv4.icanhazip.com", // 强制 IPv4
+		"https://v4.ident.me",        // 强制 IPv4
+	}
+
+	// 备用服务（可能返回 IPv6）
+	fallbackServices := []string{
 		"https://ifconfig.me/ip",
 		"https://ipinfo.io/ip",
-		"https://api.ipify.org",
 		"https://icanhazip.com",
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	for _, url := range services {
-		resp, err := client.Get(url)
-		if err != nil {
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			continue
-		}
-
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
-		if err != nil {
-			continue
-		}
-
-		ip := strings.TrimSpace(string(body))
-		// 简单验证是否像 IP 地址
-		if len(ip) >= 7 && len(ip) <= 45 && (strings.Contains(ip, ".") || strings.Contains(ip, ":")) {
+	// 先尝试获取 IPv4
+	for _, url := range ipv4Services {
+		if ip := fetchIPFromURL(client, url); ip != "" && isIPv4(ip) {
 			return ip
 		}
 	}
 
+	// 如果没有 IPv4，尝试备用服务
+	for _, url := range fallbackServices {
+		if ip := fetchIPFromURL(client, url); ip != "" {
+			// 优先返回 IPv4
+			if isIPv4(ip) {
+				return ip
+			}
+		}
+	}
+
 	return ""
+}
+
+func fetchIPFromURL(client *http.Client, url string) string {
+	resp, err := client.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+
+	ip := strings.TrimSpace(string(body))
+	// 简单验证是否像 IP 地址
+	if len(ip) >= 7 && len(ip) <= 45 && (strings.Contains(ip, ".") || strings.Contains(ip, ":")) {
+		return ip
+	}
+	return ""
+}
+
+func isIPv4(ip string) bool {
+	// IPv4 只包含点，不包含冒号
+	return strings.Contains(ip, ".") && !strings.Contains(ip, ":")
 }
