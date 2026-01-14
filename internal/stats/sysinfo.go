@@ -2,10 +2,14 @@ package stats
 
 import (
 	"bufio"
+	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // SystemLoad 系统负载信息
@@ -90,4 +94,70 @@ func getMemoryUsage() float64 {
 
 	used := memTotal - memAvailable
 	return float64(used) / float64(memTotal) * 100
+}
+
+// 公网 IP 缓存
+var (
+	cachedPublicIP   string
+	publicIPMutex    sync.RWMutex
+	publicIPLastTime time.Time
+	publicIPCacheTTL = 5 * time.Minute // 缓存 5 分钟
+)
+
+// GetPublicIP 获取公网 IP（带缓存）
+func GetPublicIP() string {
+	publicIPMutex.RLock()
+	if cachedPublicIP != "" && time.Since(publicIPLastTime) < publicIPCacheTTL {
+		ip := cachedPublicIP
+		publicIPMutex.RUnlock()
+		return ip
+	}
+	publicIPMutex.RUnlock()
+
+	// 需要刷新
+	ip := fetchPublicIP()
+	if ip != "" {
+		publicIPMutex.Lock()
+		cachedPublicIP = ip
+		publicIPLastTime = time.Now()
+		publicIPMutex.Unlock()
+	}
+	return ip
+}
+
+// fetchPublicIP 从外部服务获取公网 IP
+func fetchPublicIP() string {
+	services := []string{
+		"https://ifconfig.me/ip",
+		"https://ipinfo.io/ip",
+		"https://api.ipify.org",
+		"https://icanhazip.com",
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	for _, url := range services {
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+		if err != nil {
+			continue
+		}
+
+		ip := strings.TrimSpace(string(body))
+		// 简单验证是否像 IP 地址
+		if len(ip) >= 7 && len(ip) <= 45 && (strings.Contains(ip, ".") || strings.Contains(ip, ":")) {
+			return ip
+		}
+	}
+
+	return ""
 }

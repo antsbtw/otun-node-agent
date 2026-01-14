@@ -86,6 +86,7 @@ type HeartbeatRequest struct {
 	NodeID    string    `json:"node_id"`
 	Timestamp time.Time `json:"timestamp"`
 	Load      NodeLoad  `json:"load"`
+	PublicIP  string    `json:"public_ip,omitempty"` // 节点公网 IP（自动检测）
 }
 
 // NodeLoad 节点负载信息

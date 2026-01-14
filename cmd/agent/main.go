@@ -506,9 +506,13 @@ func (a *Agent) sendHeartbeat() {
 	// 获取连接数
 	connections, _ := a.connMgr.GetActiveConnections()
 
+	// 获取公网 IP（自动检测）
+	publicIP := stats.GetPublicIP()
+
 	req := &config.HeartbeatRequest{
 		NodeID:    a.cfg.NodeID,
 		Timestamp: time.Now().UTC(),
+		PublicIP:  publicIP,
 		Load: config.NodeLoad{
 			CPUPercent:        sysLoad.CPUPercent,
 			MemoryPercent:     sysLoad.MemoryPercent,
