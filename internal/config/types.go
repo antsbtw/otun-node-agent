@@ -23,6 +23,11 @@ type AgentConfig struct {
 	StatsInterval  time.Duration
 	VLESSPort      int
 	SSPort         int
+	VmessPort      int    // VMess+TLS 端口 (多协议 VPN)
+	TrojanPort     int    // Trojan 端口 (多协议 VPN)
+	Hysteria2Port  int    // Hysteria2 端口 (多协议 VPN)
+	TuicPort       int    // TUIC 端口 (多协议 VPN)
+	VpnDomain      string // VPN TLS 域名 (多协议 VPN)
 	SingboxBin     string
 	SingboxConfig  string
 	LogLevel       string

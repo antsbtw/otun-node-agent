@@ -22,6 +22,11 @@ func LoadFromEnv() *AgentConfig {
 		StatsInterval:  getDurationEnv("STATS_INTERVAL", 300) * time.Second,
 		VLESSPort:      getIntEnv("VLESS_PORT", 443),
 		SSPort:         getIntEnv("SS_PORT", 8388),
+		VmessPort:      getIntEnv("VMESS_PORT", 0),     // 0 表示未启用
+		TrojanPort:     getIntEnv("TROJAN_PORT", 0),    // 0 表示未启用
+		Hysteria2Port:  getIntEnv("HYSTERIA2_PORT", 0), // 0 表示未启用
+		TuicPort:       getIntEnv("TUIC_PORT", 0),      // 0 表示未启用
+		VpnDomain:      getEnv("VPN_DOMAIN", ""),       // VPN TLS 域名
 		SingboxBin:     getEnv("SINGBOX_BIN", "/usr/local/bin/sing-box"),
 		SingboxConfig:  getEnv("SINGBOX_CONFIG", "/etc/sing-box/config.json"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),

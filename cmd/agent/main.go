@@ -489,13 +489,20 @@ func (a *Agent) syncAndApplyHybrid() error {
 
 // register 向管理服务器注册
 func (a *Agent) register() error {
-	return a.syncer.Register(
-		a.cfg.NodeID,
-		a.secrets.PublicKey,
-		a.secrets.ShortIDs,
-		a.cfg.VLESSPort,
-		a.cfg.SSPort,
-	)
+	// 使用多协议注册配置
+	regCfg := &config.RegisterConfig{
+		NodeID:        a.cfg.NodeID,
+		PublicKey:     a.secrets.PublicKey,
+		ShortIDs:      a.secrets.ShortIDs,
+		VlessPort:     a.cfg.VLESSPort,
+		SSPort:        a.cfg.SSPort,
+		VmessPort:     a.cfg.VmessPort,     // 可选：VMess+TLS
+		TrojanPort:    a.cfg.TrojanPort,    // 可选：Trojan
+		Hysteria2Port: a.cfg.Hysteria2Port, // 可选：Hysteria2
+		TuicPort:      a.cfg.TuicPort,      // 可选：TUIC
+		VpnDomain:     a.cfg.VpnDomain,     // 可选：VPN TLS 域名
+	}
+	return a.syncer.RegisterWithConfig(regCfg)
 }
 
 // sendHeartbeat 发送心跳

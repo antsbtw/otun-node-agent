@@ -37,24 +37,78 @@ type RegisterRequest struct {
 	Protocols map[string]any `json:"protocols"`
 }
 
-// Register 向管理服务器注册节点
-func (s *Syncer) Register(nodeID, publicKey string, shortIDs []string, vlessPort, ssPort int) error {
-	url := fmt.Sprintf("%s/api/node/register", s.apiURL)
+// RegisterConfig 注册配置参数
+type RegisterConfig struct {
+	NodeID        string
+	PublicKey     string
+	ShortIDs      []string
+	VlessPort     int
+	SSPort        int
+	VmessPort     int    // 可选：VMess+TLS 端口
+	TrojanPort    int    // 可选：Trojan 端口
+	Hysteria2Port int    // 可选：Hysteria2 端口
+	TuicPort      int    // 可选：TUIC 端口
+	VpnDomain     string // 可选：VPN TLS 域名
+}
 
-	req := RegisterRequest{
+// Register 向管理服务器注册节点 (兼容旧接口)
+func (s *Syncer) Register(nodeID, publicKey string, shortIDs []string, vlessPort, ssPort int) error {
+	return s.RegisterWithConfig(&RegisterConfig{
 		NodeID:    nodeID,
-		Version:   "1.0.0",
 		PublicKey: publicKey,
 		ShortIDs:  shortIDs,
-		Protocols: map[string]any{
-			"vless_reality": map[string]any{
-				"port": vlessPort,
-			},
-			"shadowsocks": map[string]any{
-				"port":   ssPort,
-				"method": "chacha20-ietf-poly1305",
-			},
+		VlessPort: vlessPort,
+		SSPort:    ssPort,
+	})
+}
+
+// RegisterWithConfig 向管理服务器注册节点 (支持多协议)
+func (s *Syncer) RegisterWithConfig(cfg *RegisterConfig) error {
+	url := fmt.Sprintf("%s/api/node/register", s.apiURL)
+
+	// 构建协议配置
+	protocols := map[string]any{
+		"vless_reality": map[string]any{
+			"port": cfg.VlessPort,
 		},
+		"shadowsocks": map[string]any{
+			"port":   cfg.SSPort,
+			"method": "chacha20-ietf-poly1305",
+		},
+	}
+
+	// 添加可选的多协议配置 (仅当端口 > 0 时添加)
+	if cfg.VmessPort > 0 {
+		protocols["vmess"] = map[string]any{
+			"port":   cfg.VmessPort,
+			"domain": cfg.VpnDomain,
+		}
+	}
+	if cfg.TrojanPort > 0 {
+		protocols["trojan"] = map[string]any{
+			"port":   cfg.TrojanPort,
+			"domain": cfg.VpnDomain,
+		}
+	}
+	if cfg.Hysteria2Port > 0 {
+		protocols["hysteria2"] = map[string]any{
+			"port":   cfg.Hysteria2Port,
+			"domain": cfg.VpnDomain,
+		}
+	}
+	if cfg.TuicPort > 0 {
+		protocols["tuic"] = map[string]any{
+			"port":   cfg.TuicPort,
+			"domain": cfg.VpnDomain,
+		}
+	}
+
+	req := RegisterRequest{
+		NodeID:    cfg.NodeID,
+		Version:   "1.0.0",
+		PublicKey: cfg.PublicKey,
+		ShortIDs:  cfg.ShortIDs,
+		Protocols: protocols,
 	}
 
 	return s.postJSON(url, req, nil)
