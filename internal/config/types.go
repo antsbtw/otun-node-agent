@@ -109,7 +109,16 @@ type NodeLoad struct {
 
 // HeartbeatResponse 心跳响应
 type HeartbeatResponse struct {
-	OK          bool     `json:"ok"`
-	KickUsers   []string `json:"kick_users"`    // 需要踢掉的用户
-	ReloadUsers bool     `json:"reload_users"`  // 是否需要重新拉取用户列表
+	OK          bool        `json:"ok"`
+	KickUsers   []string    `json:"kick_users"`             // 需要踢掉的用户
+	ReloadUsers bool        `json:"reload_users"`           // 是否需要重新拉取用户列表
+	CertUpdate  *CertUpdate `json:"cert_update,omitempty"`  // 证书更新 (如果有)
+}
+
+// CertUpdate 证书更新信息
+type CertUpdate struct {
+	Domain    string `json:"domain"`     // 域名
+	Cert      string `json:"cert"`       // 证书内容 (PEM)
+	Key       string `json:"key"`        // 私钥内容 (PEM)
+	ExpiresAt string `json:"expires_at"` // 过期时间 (ISO8601)
 }

@@ -83,3 +83,20 @@ func (m *CertManager) FetchAndSaveCert(tlsClient *client.TLSClient, domain strin
 
 	return m.SaveCert(cert)
 }
+
+// SaveCertFromUpdate 保存从心跳响应中收到的证书更新
+func (m *CertManager) SaveCertFromUpdate(update *CertUpdate) error {
+	// 写入证书
+	if err := os.WriteFile(m.certPath, []byte(update.Cert), 0644); err != nil {
+		return fmt.Errorf("write cert: %w", err)
+	}
+
+	// 写入私钥 (严格权限)
+	if err := os.WriteFile(m.keyPath, []byte(update.Key), 0600); err != nil {
+		return fmt.Errorf("write key: %w", err)
+	}
+
+	log.Printf("[CertManager] Certificate updated from heartbeat, domain: %s, expires at: %s",
+		update.Domain, update.ExpiresAt)
+	return nil
+}

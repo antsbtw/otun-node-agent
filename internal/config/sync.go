@@ -175,6 +175,17 @@ func (s *Syncer) HasNewVersion(version string) bool {
 	return s.lastVersion != version
 }
 
+// AckCertUpdate 确认证书更新
+func (s *Syncer) AckCertUpdate(nodeID string) error {
+	url := fmt.Sprintf("%s/api/node/cert-ack", s.apiURL)
+
+	req := map[string]string{
+		"node_id": nodeID,
+	}
+
+	return s.postJSON(url, req, nil)
+}
+
 // postJSON 发送 JSON POST 请求
 func (s *Syncer) postJSON(url string, reqBody any, respBody any) error {
 	data, err := json.Marshal(reqBody)

@@ -8,7 +8,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  OTun Node Agent Installer v1.0.0${NC}"
+echo -e "${GREEN}  OTun Node Agent Installer v2.0.0${NC}"
+echo -e "${GREEN}  Multi-Protocol Support${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # 检查 root 权限
@@ -57,6 +58,17 @@ VLESS_PORT=443
 MANAGEMENT_MODE="local"
 SERVER_IP=""
 
+# 多协议参数
+VPN_DOMAIN=""
+VMESS_PORT=0
+TROJAN_PORT=0
+HYSTERIA2_PORT=0
+TUIC_PORT=0
+
+# TLS 证书参数 (Base64 编码)
+CERT_CONTENT=""
+KEY_CONTENT=""
+
 # 默认值
 API_URL="https://otun-manager.situstechnologies.com"
 
@@ -68,6 +80,15 @@ while [[ $# -gt 0 ]]; do
         --vless-port) VLESS_PORT="$2"; shift 2 ;;
         --management-mode) MANAGEMENT_MODE="$2"; shift 2 ;;
         --server-ip) SERVER_IP="$2"; shift 2 ;;
+        # 多协议参数
+        --vpn-domain) VPN_DOMAIN="$2"; shift 2 ;;
+        --vmess-port) VMESS_PORT="$2"; shift 2 ;;
+        --trojan-port) TROJAN_PORT="$2"; shift 2 ;;
+        --hysteria2-port) HYSTERIA2_PORT="$2"; shift 2 ;;
+        --tuic-port) TUIC_PORT="$2"; shift 2 ;;
+        # TLS 证书参数
+        --cert-content) CERT_CONTENT="$2"; shift 2 ;;
+        --key-content) KEY_CONTENT="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -75,12 +96,30 @@ done
 if [ -z "$NODE_API_KEY" ]; then
     echo -e "${RED}Error: --api-key is required${NC}"
     echo "Usage: $0 --api-key <key> [--node-id <id>] [--vless-port <port>] [--management-mode local|remote|hybrid] [--server-ip <ip>]"
+    echo ""
+    echo "Multi-protocol options:"
+    echo "  --vpn-domain <domain>       VPN domain for TLS protocols"
+    echo "  --vmess-port <port>         VMess+TLS port (default: disabled)"
+    echo "  --trojan-port <port>        Trojan port (default: disabled)"
+    echo "  --hysteria2-port <port>     Hysteria2 port (default: disabled)"
+    echo "  --tuic-port <port>          TUIC port (default: disabled)"
+    echo "  --cert-content <base64>     TLS certificate (base64 encoded)"
+    echo "  --key-content <base64>      TLS private key (base64 encoded)"
     exit 1
 fi
 
 echo -e "${YELLOW}Node ID: ${NODE_ID}${NC}"
 echo -e "${YELLOW}VLESS Port: ${VLESS_PORT}${NC}"
 echo -e "${YELLOW}Management Mode: ${MANAGEMENT_MODE}${NC}"
+
+# 显示多协议配置
+if [ -n "$VPN_DOMAIN" ]; then
+    echo -e "${YELLOW}VPN Domain: ${VPN_DOMAIN}${NC}"
+    echo -e "${YELLOW}VMess Port: ${VMESS_PORT}${NC}"
+    echo -e "${YELLOW}Trojan Port: ${TROJAN_PORT}${NC}"
+    echo -e "${YELLOW}Hysteria2 Port: ${HYSTERIA2_PORT}${NC}"
+    echo -e "${YELLOW}TUIC Port: ${TUIC_PORT}${NC}"
+fi
 
 # 安装目录
 INSTALL_DIR="/opt/otun-agent"
@@ -130,7 +169,7 @@ if ! curl -fsSL "$SINGBOX_URL" -o /usr/local/bin/sing-box; then
     rm -rf sing-box-src
     git clone --depth 1 --branch "v${SINGBOX_VERSION}" https://github.com/SagerNet/sing-box.git sing-box-src
     cd sing-box-src
-    if ! go build -tags "with_v2ray_api,with_utls,with_reality_server" -o sing-box ./cmd/sing-box; then
+    if ! go build -tags "with_v2ray_api,with_utls,with_reality_server,with_quic" -o sing-box ./cmd/sing-box; then
         echo -e "${RED}Failed to build sing-box${NC}"
         cd /tmp && rm -rf sing-box-src
         exit 1
@@ -196,7 +235,18 @@ echo -e "${GREEN}Agent ready${NC}"
 
 # 创建数据目录
 mkdir -p $INSTALL_DIR/data
+mkdir -p $INSTALL_DIR/data/certs
 mkdir -p /etc/sing-box
+
+# 保存 TLS 证书 (如果提供)
+if [ -n "$CERT_CONTENT" ] && [ -n "$KEY_CONTENT" ]; then
+    echo -e "${GREEN}Saving TLS certificates...${NC}"
+    echo "$CERT_CONTENT" | base64 -d > $INSTALL_DIR/data/certs/cert.pem
+    echo "$KEY_CONTENT" | base64 -d > $INSTALL_DIR/data/certs/key.pem
+    chmod 644 $INSTALL_DIR/data/certs/cert.pem
+    chmod 600 $INSTALL_DIR/data/certs/key.pem
+    echo -e "${GREEN}TLS certificates saved${NC}"
+fi
 
 # 创建初始配置
 cat > /etc/sing-box/config.json << 'CONF'
@@ -207,6 +257,47 @@ cat > /etc/sing-box/config.json << 'CONF'
 }
 CONF
 
+# 构建环境变量
+ENV_VARS="Environment=\"NODE_API_KEY=$NODE_API_KEY\"
+Environment=\"NODE_ID=$NODE_ID\"
+Environment=\"VLESS_PORT=$VLESS_PORT\"
+Environment=\"OTUN_API_URL=$API_URL\"
+Environment=\"MANAGEMENT_MODE=$MANAGEMENT_MODE\"
+Environment=\"SERVER_IP=$SERVER_IP\""
+
+# 添加多协议环境变量
+if [ -n "$VPN_DOMAIN" ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"VPN_DOMAIN=$VPN_DOMAIN\""
+fi
+
+if [ "$VMESS_PORT" -gt 0 ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"VMESS_PORT=$VMESS_PORT\""
+fi
+
+if [ "$TROJAN_PORT" -gt 0 ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"TROJAN_PORT=$TROJAN_PORT\""
+fi
+
+if [ "$HYSTERIA2_PORT" -gt 0 ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"HYSTERIA2_PORT=$HYSTERIA2_PORT\""
+fi
+
+if [ "$TUIC_PORT" -gt 0 ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"TUIC_PORT=$TUIC_PORT\""
+fi
+
+# 如果有证书，添加证书路径
+if [ -f "$INSTALL_DIR/data/certs/cert.pem" ]; then
+    ENV_VARS="$ENV_VARS
+Environment=\"TLS_CERT_PATH=$INSTALL_DIR/data/certs/cert.pem\"
+Environment=\"TLS_KEY_PATH=$INSTALL_DIR/data/certs/key.pem\""
+fi
+
 # 创建 systemd 服务
 cat > /etc/systemd/system/otun-agent.service << SYSTEMD
 [Unit]
@@ -216,12 +307,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-Environment="NODE_API_KEY=$NODE_API_KEY"
-Environment="NODE_ID=$NODE_ID"
-Environment="VLESS_PORT=$VLESS_PORT"
-Environment="OTUN_API_URL=$API_URL"
-Environment="MANAGEMENT_MODE=$MANAGEMENT_MODE"
-Environment="SERVER_IP=$SERVER_IP"
+$ENV_VARS
 ExecStart=$INSTALL_DIR/agent
 Restart=always
 RestartSec=5
@@ -234,6 +320,18 @@ SYSTEMD
 systemctl daemon-reload
 systemctl enable otun-agent
 systemctl start otun-agent
+
+# 等待 agent 启动并生成 secrets
+echo -e "${GREEN}Waiting for agent to start...${NC}"
+sleep 5
+
+# 确保 secrets.json 存在
+for i in {1..10}; do
+    if [ -f "$INSTALL_DIR/data/secrets.json" ]; then
+        break
+    fi
+    sleep 1
+done
 
 # 创建管理命令
 cat > /usr/local/bin/otun << 'CMD'
@@ -249,6 +347,41 @@ esac
 CMD
 chmod +x /usr/local/bin/otun
 
+# 生成 secrets.json (如果不存在)
+if [ ! -f "$INSTALL_DIR/data/secrets.json" ]; then
+    echo -e "${YELLOW}Generating secrets...${NC}"
+    # 等待 agent 生成 secrets
+    sleep 3
+fi
+
+# 读取并增强 secrets.json 以包含多协议端口
+if [ -f "$INSTALL_DIR/data/secrets.json" ]; then
+    # 读取现有的 secrets
+    SECRETS=$(cat $INSTALL_DIR/data/secrets.json)
+
+    # 使用 Python 添加多协议端口 (如果有 Python)
+    if command -v python3 &> /dev/null; then
+        python3 << PYTHON
+import json
+
+try:
+    with open('$INSTALL_DIR/data/secrets.json', 'r') as f:
+        secrets = json.load(f)
+except:
+    secrets = {}
+
+# 添加多协议端口
+secrets['vmess_port'] = $VMESS_PORT
+secrets['trojan_port'] = $TROJAN_PORT
+secrets['hysteria2_port'] = $HYSTERIA2_PORT
+secrets['tuic_port'] = $TUIC_PORT
+
+with open('$INSTALL_DIR/data/secrets.json', 'w') as f:
+    json.dump(secrets, f, indent=2)
+PYTHON
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Installation Complete!${NC}"
@@ -257,6 +390,18 @@ echo ""
 echo -e "Node ID: ${YELLOW}$NODE_ID${NC}"
 echo -e "Config:  ${YELLOW}/etc/sing-box/config.json${NC}"
 echo -e "Data:    ${YELLOW}$INSTALL_DIR/data${NC}"
+
+if [ -n "$VPN_DOMAIN" ]; then
+    echo ""
+    echo -e "${GREEN}Multi-Protocol Configuration:${NC}"
+    echo -e "  VPN Domain:    ${YELLOW}$VPN_DOMAIN${NC}"
+    echo -e "  VLESS Port:    ${YELLOW}$VLESS_PORT${NC}"
+    echo -e "  VMess Port:    ${YELLOW}$VMESS_PORT${NC}"
+    echo -e "  Trojan Port:   ${YELLOW}$TROJAN_PORT${NC}"
+    echo -e "  Hysteria2 Port: ${YELLOW}$HYSTERIA2_PORT${NC}"
+    echo -e "  TUIC Port:     ${YELLOW}$TUIC_PORT${NC}"
+fi
+
 echo ""
 echo -e "Commands:"
 echo -e "  ${YELLOW}otun status${NC}  - Check service status"

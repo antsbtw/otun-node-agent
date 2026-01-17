@@ -551,6 +551,11 @@ func (a *Agent) sendHeartbeat() {
 		a.kickUsers(resp.KickUsers)
 	}
 
+	// 处理证书更新
+	if resp.CertUpdate != nil {
+		a.handleCertUpdate(resp.CertUpdate)
+	}
+
 	// 检查是否需要重新加载用户
 	if resp.ReloadUsers {
 		log.Println("Manager requested user reload")
@@ -558,6 +563,35 @@ func (a *Agent) sendHeartbeat() {
 			a.syncAndApplyHybrid()
 		} else {
 			a.syncAndApply()
+		}
+	}
+}
+
+// handleCertUpdate 处理证书更新
+func (a *Agent) handleCertUpdate(certUpdate *config.CertUpdate) {
+	log.Printf("[CertUpdate] Received certificate update for domain: %s", certUpdate.Domain)
+
+	// 创建证书管理器并保存证书
+	certMgr := config.NewCertManager(a.dataDir)
+	if err := certMgr.SaveCertFromUpdate(certUpdate); err != nil {
+		log.Printf("[CertUpdate] Failed to save certificate: %v", err)
+		return
+	}
+
+	log.Printf("[CertUpdate] Certificate saved successfully, expires at: %s", certUpdate.ExpiresAt)
+
+	// 确认证书更新
+	if err := a.syncer.AckCertUpdate(a.cfg.NodeID); err != nil {
+		log.Printf("[CertUpdate] Failed to acknowledge cert update: %v", err)
+	} else {
+		log.Println("[CertUpdate] Certificate update acknowledged")
+	}
+
+	// 重新加载 sing-box 以应用新证书
+	if a.manager.IsRunning() {
+		log.Println("[CertUpdate] Reloading sing-box to apply new certificate...")
+		if err := a.manager.Reload(); err != nil {
+			log.Printf("[CertUpdate] Failed to reload sing-box: %v", err)
 		}
 	}
 }
