@@ -31,7 +31,8 @@ func LoadFromEnv() *AgentConfig {
 		SingboxConfig:  getEnv("SINGBOX_CONFIG", "/etc/sing-box/config.json"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		ManagementMode: mode,
-		ServerIP:       getEnv("SERVER_IP", ""), // 服务器公网 IP，用于生成连接 URL
+		ServerIP:       getEnv("SERVER_IP", ""),            // 服务器公网 IP，用于生成连接 URL
+		TLSServiceKey:  getEnv("TLS_SERVICE_API_KEY", ""),  // TLS 服务 API Key (用于拉取证书)
 	}
 }
 

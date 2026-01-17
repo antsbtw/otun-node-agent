@@ -34,6 +34,10 @@ type AgentConfig struct {
 	ManagementMode ManagementMode // 管理模式
 	ServerIP       string         // 服务器公网 IP（用于生成连接 URL）
 	SingboxAPIAddr string         // sing-box V2Ray API 地址（本地统计端口）
+
+	// 多协议模式 (remote 模式动态获取)
+	TLSServiceURL  string // TLS 服务地址 (从 manager 获取)
+	TLSServiceKey  string // TLS 服务 API Key
 }
 
 // User 是从管理服务器获取的用户信息

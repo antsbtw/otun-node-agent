@@ -37,6 +37,10 @@ type Agent struct {
 	localStore *local.Store
 	localAPI   *api.LocalAPIServer
 
+	// 多协议模式 (remote 模式 VPN 节点)
+	multiProto *MultiProtocolContext
+	dataDir    string // 数据目录路径
+
 	currentVersion string
 	mu             sync.RWMutex
 }
@@ -128,6 +132,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 		connMgr:   connMgr,
 		collector: collector,
 		reporter:  reporter,
+		dataDir:   dataDir,
 	}
 
 	// 更新配置中的实际端口
@@ -253,6 +258,13 @@ func (a *Agent) initLocalMode() {
 
 // initRemoteMode 初始化远程模式
 func (a *Agent) initRemoteMode() {
+	// 尝试初始化多协议模式 (如果 manager 返回了多协议配置)
+	multiProto, err := a.initMultiProtocol(a.dataDir)
+	if err != nil {
+		log.Printf("Multi-protocol init failed (will use standard mode): %v", err)
+	}
+	a.multiProto = multiProto
+
 	// 节点注册
 	if err := a.register(); err != nil {
 		log.Printf("Node registration failed: %v", err)
@@ -642,11 +654,18 @@ func (a *Agent) syncAndApply() error {
 		log.Printf("Failed to cache users: %v", err)
 	}
 
-	// 远程模式不检查本地熔断状态
-	singboxCfg := a.generator.Generate(resp.Users, resp.Config.RealitySNI, false)
-
-	if err := a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig); err != nil {
-		return err
+	// 根据是否有多协议上下文选择不同的生成器
+	if a.multiProto != nil {
+		// 多协议模式：使用多协议生成器
+		if err := a.generateMultiProtocolConfig(a.multiProto, resp.Users, false); err != nil {
+			return err
+		}
+	} else {
+		// 标准模式：使用基础生成器
+		singboxCfg := a.generator.Generate(resp.Users, resp.Config.RealitySNI, false)
+		if err := a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig); err != nil {
+			return err
+		}
 	}
 
 	a.mu.Lock()
@@ -670,7 +689,12 @@ func (a *Agent) applyFromCache() error {
 
 	a.monitor.UpdateUsers(resp.Users)
 
-	// 远程模式不检查本地熔断状态
+	// 根据是否有多协议上下文选择不同的生成器
+	if a.multiProto != nil {
+		return a.generateMultiProtocolConfig(a.multiProto, resp.Users, false)
+	}
+
+	// 标准模式
 	singboxCfg := a.generator.Generate(resp.Users, resp.Config.RealitySNI, false)
 	return a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig)
 }
