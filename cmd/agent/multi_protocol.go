@@ -48,6 +48,8 @@ func (a *Agent) initMultiProtocol(dataDir string) (*MultiProtocolContext, error)
 
 	// 3. 使用本地配置覆盖 manager 返回的端口配置（真实来源原则）
 	// Agent 自己的环境变量配置才是权威的
+	nodeConfig.VlessPort = a.cfg.VLESSPort
+	nodeConfig.SSPort = a.cfg.SSPort
 	nodeConfig.VmessPort = a.cfg.VmessPort
 	nodeConfig.TrojanPort = a.cfg.TrojanPort
 	nodeConfig.Hysteria2Port = a.cfg.Hysteria2Port
