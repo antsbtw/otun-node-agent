@@ -141,18 +141,33 @@ func (m *Monitor) ResetSessionTraffic() {
 	}
 }
 
-// CheckAllUsers 检查所有用户的过期状态（定时调用）
+// CheckAllUsers 检查所有用户的过期和流量限额状态（定时调用）
 func (m *Monitor) CheckAllUsers() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
 	for uuid, user := range m.users {
+		// 检查过期
 		if user.ExpireAt != nil && now.After(*user.ExpireAt) {
 			log.Printf("User %s expired (periodic check)", uuid)
 			delete(m.users, uuid)
 			if m.onRemove != nil {
 				go m.onRemove(uuid, "expired")
+			}
+			continue
+		}
+
+		// 检查流量限额（0 = 无限制）
+		if user.TrafficLimit > 0 {
+			totalUsed := user.TrafficUsed + user.SessionTraffic
+			if totalUsed >= user.TrafficLimit {
+				log.Printf("User %s quota exceeded (periodic check): %d/%d bytes",
+					uuid, totalUsed, user.TrafficLimit)
+				delete(m.users, uuid)
+				if m.onRemove != nil {
+					go m.onRemove(uuid, "quota_exceeded")
+				}
 			}
 		}
 	}

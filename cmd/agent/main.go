@@ -745,6 +745,16 @@ func (a *Agent) collectAndReport() {
 		return
 	}
 
+	// 检查每个用户的流量限制，超限用户会被踢出
+	for uuid, stat := range userStats {
+		traffic := stat.Upload + stat.Download
+		if traffic > 0 {
+			if !a.monitor.CheckUser(uuid, traffic) {
+				log.Printf("User %s failed quota check during stats collection", uuid)
+			}
+		}
+	}
+
 	log.Printf("Reporting stats for %d users", len(userStats))
 
 	if err := a.reporter.Report(userStats); err != nil {
