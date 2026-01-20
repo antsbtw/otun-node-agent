@@ -19,7 +19,7 @@ func LoadFromEnv() *AgentConfig {
 		NodeAPIKey:     getEnv("NODE_API_KEY", ""),
 		NodeID:         getEnv("NODE_ID", "node-default"),
 		SyncInterval:   getDurationEnv("SYNC_INTERVAL", 60) * time.Second,
-		StatsInterval:  getDurationEnv("STATS_INTERVAL", 300) * time.Second,
+		StatsInterval:  getDurationEnv("STATS_INTERVAL", 60) * time.Second,
 		VLESSPort:      getIntEnv("VLESS_PORT", 443),
 		SSPort:         getIntEnv("SS_PORT", 8388),
 		VmessPort:      getIntEnv("VMESS_PORT", 0),     // 0 表示未启用
