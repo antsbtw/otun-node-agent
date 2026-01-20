@@ -115,10 +115,13 @@ func (g *Generator) Generate(users []User, realitySNI string, circuitBreakerEnab
 
 	config["inbounds"] = inbounds
 
-	// V2Ray API for stats - 始终启用
+	// Clash API for connections HTTP API + V2Ray API for stats
 	config["experimental"] = map[string]any{
+		"clash_api": map[string]any{
+			"external_controller": "127.0.0.1:10085",
+		},
 		"v2ray_api": map[string]any{
-			"listen": "127.0.0.1:10085",
+			"listen": "127.0.0.1:10086",
 			"stats": map[string]any{
 				"enabled": true,
 				"users":   statsUsers,
