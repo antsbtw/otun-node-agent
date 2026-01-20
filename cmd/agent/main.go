@@ -735,6 +735,7 @@ func (a *Agent) applyFromCache() error {
 
 // collectAndReport 收集并上报统计
 func (a *Agent) collectAndReport() {
+	log.Println("Collecting stats...")
 	userStats, err := a.collector.Collect()
 	if err != nil {
 		log.Printf("Failed to collect stats: %v", err)
@@ -742,6 +743,7 @@ func (a *Agent) collectAndReport() {
 	}
 
 	if len(userStats) == 0 {
+		log.Println("No stats to report (no active users with traffic)")
 		return
 	}
 
