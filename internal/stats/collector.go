@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
-// Collector 从 sing-box V2Ray API 收集流量统计
+// Collector 从 sing-box API 收集流量统计
 type Collector struct {
 	apiAddr    string
 	httpClient *http.Client
@@ -30,55 +29,59 @@ func NewCollector(apiAddr string) *Collector {
 	}
 }
 
-// V2RayStatsResponse sing-box V2Ray API 响应
-type V2RayStatsResponse struct {
-	Stat []struct {
-		Name  string `json:"name"`
-		Value int64  `json:"value"`
-	} `json:"stat"`
+// ActiveConnection sing-box 返回的连接信息
+type ActiveConnection struct {
+	ID       string `json:"id"`
+	Metadata struct {
+		User        string `json:"user"`
+		Source      string `json:"source"`
+		Destination string `json:"destination"`
+	} `json:"metadata"`
+	Upload   int64  `json:"upload"`
+	Download int64  `json:"download"`
+	Start    string `json:"start"`
+}
+
+// ConnectionsResponse sing-box connections API 响应
+type ConnectionsResponse struct {
+	Connections []ActiveConnection `json:"connections"`
 }
 
 // Collect 收集所有用户的流量统计
+// 通过 /connections API 获取当前活跃连接的流量数据
 func (c *Collector) Collect() (map[string]*UserStats, error) {
-	url := fmt.Sprintf("http://%s/v2ray.core.app.stats.command.StatsService/QueryStats", c.apiAddr)
+	url := fmt.Sprintf("http://%s/connections", c.apiAddr)
 
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("request stats: %w", err)
+		return nil, fmt.Errorf("request connections: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("stats API returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("connections API returned %d", resp.StatusCode)
 	}
 
-	var result V2RayStatsResponse
+	var result ConnectionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode stats: %w", err)
+		return nil, fmt.Errorf("decode connections: %w", err)
 	}
 
-	// 解析统计数据
-	// V2Ray stats 格式: user>>>uuid>>>traffic>>>uplink 或 user>>>uuid>>>traffic>>>downlink
+	// 按用户聚合流量
 	stats := make(map[string]*UserStats)
 
-	for _, stat := range result.Stat {
-		parts := strings.Split(stat.Name, ">>>")
-		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
+	for _, conn := range result.Connections {
+		userUUID := conn.Metadata.User
+		if userUUID == "" {
 			continue
 		}
 
-		uuid := parts[1]
-		direction := parts[3]
-
-		if _, ok := stats[uuid]; !ok {
-			stats[uuid] = &UserStats{}
+		if _, ok := stats[userUUID]; !ok {
+			stats[userUUID] = &UserStats{}
 		}
 
-		if direction == "uplink" {
-			stats[uuid].Upload = stat.Value
-		} else if direction == "downlink" {
-			stats[uuid].Download = stat.Value
-		}
+		stats[userUUID].Upload += conn.Upload
+		stats[userUUID].Download += conn.Download
 	}
 
 	return stats, nil
