@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -57,13 +58,26 @@ func (c *Collector) Collect() (map[string]*UserStats, error) {
 	}
 
 	// 解析统计数据
-	// 格式: user>>>uuid>>>traffic>>>uplink/downlink
+	// V2Ray stats 格式: user>>>uuid>>>traffic>>>uplink 或 user>>>uuid>>>traffic>>>downlink
 	stats := make(map[string]*UserStats)
 
 	for _, stat := range result.Stat {
-		// 简化解析，实际格式可能需要调整
-		if _, ok := stats[stat.Name]; !ok {
-			stats[stat.Name] = &UserStats{}
+		parts := strings.Split(stat.Name, ">>>")
+		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
+			continue
+		}
+
+		uuid := parts[1]
+		direction := parts[3]
+
+		if _, ok := stats[uuid]; !ok {
+			stats[uuid] = &UserStats{}
+		}
+
+		if direction == "uplink" {
+			stats[uuid].Upload = stat.Value
+		} else if direction == "downlink" {
+			stats[uuid].Download = stat.Value
 		}
 	}
 
