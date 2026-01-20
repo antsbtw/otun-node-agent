@@ -1,16 +1,20 @@
 package stats
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
+	"strings"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	statsService "github.com/v2fly/v2ray-core/v5/app/stats/command"
 )
 
-// Collector 从 sing-box API 收集流量统计
+// Collector 从 sing-box V2Ray API (gRPC) 收集流量统计
 type Collector struct {
-	apiAddr    string
-	httpClient *http.Client
+	apiAddr string
 }
 
 // UserStats 用户流量统计
@@ -23,65 +27,57 @@ type UserStats struct {
 func NewCollector(apiAddr string) *Collector {
 	return &Collector{
 		apiAddr: apiAddr,
-		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
-		},
 	}
-}
-
-// ActiveConnection sing-box 返回的连接信息
-type ActiveConnection struct {
-	ID       string `json:"id"`
-	Metadata struct {
-		User        string `json:"user"`
-		Source      string `json:"source"`
-		Destination string `json:"destination"`
-	} `json:"metadata"`
-	Upload   int64  `json:"upload"`
-	Download int64  `json:"download"`
-	Start    string `json:"start"`
-}
-
-// ConnectionsResponse sing-box connections API 响应
-type ConnectionsResponse struct {
-	Connections []ActiveConnection `json:"connections"`
 }
 
 // Collect 收集所有用户的流量统计
-// 通过 /connections API 获取当前活跃连接的流量数据
+// 通过 gRPC 访问 V2Ray Stats API
 func (c *Collector) Collect() (map[string]*UserStats, error) {
-	url := fmt.Sprintf("http://%s/connections", c.apiAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	resp, err := c.httpClient.Get(url)
+	conn, err := grpc.DialContext(ctx, c.apiAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("request connections: %w", err)
+		return nil, fmt.Errorf("connect to grpc: %w", err)
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("connections API returned %d", resp.StatusCode)
+	client := statsService.NewStatsServiceClient(conn)
+
+	// 查询所有统计数据
+	resp, err := client.QueryStats(ctx, &statsService.QueryStatsRequest{
+		Pattern: "user>>>",
+		Reset_:  true, // 重置统计，避免重复计算
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query stats: %w", err)
 	}
 
-	var result ConnectionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode connections: %w", err)
-	}
-
-	// 按用户聚合流量
+	// 解析统计数据
+	// V2Ray stats 格式: user>>>uuid>>>traffic>>>uplink 或 user>>>uuid>>>traffic>>>downlink
 	stats := make(map[string]*UserStats)
 
-	for _, conn := range result.Connections {
-		userUUID := conn.Metadata.User
-		if userUUID == "" {
+	for _, stat := range resp.Stat {
+		parts := strings.Split(stat.Name, ">>>")
+		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
 			continue
 		}
 
-		if _, ok := stats[userUUID]; !ok {
-			stats[userUUID] = &UserStats{}
+		uuid := parts[1]
+		direction := parts[3]
+
+		if _, ok := stats[uuid]; !ok {
+			stats[uuid] = &UserStats{}
 		}
 
-		stats[userUUID].Upload += conn.Upload
-		stats[userUUID].Download += conn.Download
+		if direction == "uplink" {
+			stats[uuid].Upload = stat.Value
+		} else if direction == "downlink" {
+			stats[uuid].Download = stat.Value
+		}
 	}
 
 	return stats, nil
