@@ -46,6 +46,7 @@ func (g *Generator) Generate(users []User, realitySNI string, circuitBreakerEnab
 			switch proto {
 			case "vless":
 				vlessUsers = append(vlessUsers, map[string]any{
+					"name": u.UUID, // name 用于 V2Ray API 用户流量统计
 					"uuid": u.UUID,
 					"flow": "xtls-rprx-vision",
 				})

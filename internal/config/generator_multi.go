@@ -55,6 +55,7 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 			switch proto {
 			case "vless":
 				vlessUsers = append(vlessUsers, map[string]any{
+					"name": u.UUID, // name 用于 V2Ray API 用户流量统计
 					"uuid": u.UUID,
 					"flow": "xtls-rprx-vision",
 				})
@@ -65,18 +66,22 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 				})
 			case "vmess":
 				vmessUsers = append(vmessUsers, map[string]any{
+					"name": u.UUID, // name 用于 V2Ray API 用户流量统计
 					"uuid": u.UUID,
 				})
 			case "trojan":
 				trojanUsers = append(trojanUsers, map[string]any{
+					"name":     u.UUID, // name 用于 V2Ray API 用户流量统计
 					"password": u.UUID, // trojan 使用 UUID 作为密码
 				})
 			case "hysteria2":
 				hysteria2Users = append(hysteria2Users, map[string]any{
+					"name":     u.UUID, // name 用于 V2Ray API 用户流量统计
 					"password": u.UUID,
 				})
 			case "tuic":
 				tuicUsers = append(tuicUsers, map[string]any{
+					"name":     u.UUID, // name 用于 V2Ray API 用户流量统计（使用 UUID 作为标识）
 					"uuid":     u.UUID,
 					"password": u.SSPassword, // TUIC 使用 SS 密码
 				})
