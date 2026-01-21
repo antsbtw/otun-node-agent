@@ -3,6 +3,7 @@ package stats
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -54,6 +55,12 @@ func (c *Collector) Collect() (map[string]*UserStats, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("query stats: %w", err)
+	}
+
+	// 调试：打印原始响应
+	log.Printf("gRPC QueryStats returned %d stats entries", len(resp.Stat))
+	for i, stat := range resp.Stat {
+		log.Printf("  [%d] Name=%q Value=%d", i, stat.Name, stat.Value)
 	}
 
 	// 解析统计数据
