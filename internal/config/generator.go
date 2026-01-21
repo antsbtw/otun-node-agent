@@ -115,13 +115,23 @@ func (g *Generator) Generate(users []User, realitySNI string, circuitBreakerEnab
 
 	config["inbounds"] = inbounds
 
+	// 收集所有 inbound tags 用于统计
+	var statsInbounds []string
+	for _, inbound := range inbounds {
+		if tag, ok := inbound["tag"].(string); ok {
+			statsInbounds = append(statsInbounds, tag)
+		}
+	}
+
 	// V2Ray API for stats (gRPC)
+	// 必须同时配置 inbounds 和 users 才能正常统计用户流量
 	config["experimental"] = map[string]any{
 		"v2ray_api": map[string]any{
 			"listen": "127.0.0.1:10085",
 			"stats": map[string]any{
-				"enabled": true,
-				"users":   statsUsers,
+				"enabled":  true,
+				"inbounds": statsInbounds,
+				"users":    statsUsers,
 			},
 		},
 	}
