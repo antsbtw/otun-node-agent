@@ -48,7 +48,21 @@ func (c *Collector) Collect() (map[string]*UserStats, error) {
 
 	client := statsService.NewStatsServiceClient(conn)
 
-	// 查询所有统计数据
+	// 先查询所有统计数据（不重置），看看有什么
+	allResp, err := client.QueryStats(ctx, &statsService.QueryStatsRequest{
+		Pattern: "", // 空 pattern 匹配所有
+		Reset_:  false,
+	})
+	if err != nil {
+		log.Printf("Failed to query all stats: %v", err)
+	} else {
+		log.Printf("All stats entries (%d total):", len(allResp.Stat))
+		for i, stat := range allResp.Stat {
+			log.Printf("  [%d] Name=%q Value=%d", i, stat.Name, stat.Value)
+		}
+	}
+
+	// 查询用户统计数据
 	resp, err := client.QueryStats(ctx, &statsService.QueryStatsRequest{
 		Pattern: "user>>>",
 		Reset_:  true, // 重置统计，避免重复计算
@@ -57,11 +71,8 @@ func (c *Collector) Collect() (map[string]*UserStats, error) {
 		return nil, fmt.Errorf("query stats: %w", err)
 	}
 
-	// 调试：打印原始响应
-	log.Printf("gRPC QueryStats returned %d stats entries", len(resp.Stat))
-	for i, stat := range resp.Stat {
-		log.Printf("  [%d] Name=%q Value=%d", i, stat.Name, stat.Value)
-	}
+	// 调试：打印用户统计响应
+	log.Printf("User stats entries (%d):", len(resp.Stat))
 
 	// 解析统计数据
 	// V2Ray stats 格式: user>>>uuid>>>traffic>>>uplink 或 user>>>uuid>>>traffic>>>downlink
