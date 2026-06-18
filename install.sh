@@ -143,11 +143,16 @@ export PATH=$PATH:/usr/local/go/bin
 grep -q '/usr/local/go/bin' /etc/profile || echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
 echo -e "${GREEN}Go installed: $(go version)${NC}"
 
-# 下载预编译的 sing-box (已包含 v2ray_api 和 utls 支持)
-echo -e "${GREEN}Downloading pre-built sing-box with v2ray_api support...${NC}"
+# ============ sing-box（★带 v2ray_api 计费 + hy2 热更，自编译预发布 fork）============
+# ★WP-D：sing-box 源已从官方 v1.10.7 切到 antsbtw/sing-box fork（分支 realm-hot-reload，
+#   含 WP-A hy2 运行时热更端点）。WP-C 的 generator 无条件给 config 加 hot_reload 块，
+#   官方 sing-box 不认该块会 config check 失败、起不来——必须装 fork 与 agent 配套。
+#   复用 realm-agent 已验证的现成 fork release（东京/新加坡即从此 URL 拉取，含 WP-A，Revision c7939525）。
+echo -e "${GREEN}Downloading sing-box (v2ray_api + hot-reload fork)...${NC}"
 
-# sing-box 版本和预编译二进制下载地址
-SINGBOX_VERSION="1.10.7"
+# sing-box fork 版本和预编译二进制下载地址
+SINGBOX_VERSION="1.14.0-alpha.25"
+SINGBOX_FORK_BRANCH="realm-hot-reload"
 
 # 确定架构
 case $ARCH in
@@ -155,21 +160,27 @@ case $ARCH in
     aarch64) SINGBOX_ARCH="arm64" ;;
 esac
 
-# 从 GitHub Release 下载预编译二进制文件
-# 这个二进制文件由项目维护者预编译，包含 with_v2ray_api,with_utls 标签
-SINGBOX_URL="https://github.com/antsbtw/otun-node-agent/releases/download/v${SINGBOX_VERSION}/sing-box-linux-${SINGBOX_ARCH}"
+# 主路径：复用 realm-agent 自编译的 fork release（裸二进制，固定 tag）
+SINGBOX_URL="https://github.com/antsbtw/otun-realm-agent/releases/download/singbox-v${SINGBOX_VERSION}/sing-box-linux-${SINGBOX_ARCH}"
 
-echo -e "${YELLOW}Downloading sing-box v${SINGBOX_VERSION} for ${SINGBOX_ARCH}...${NC}"
+echo -e "${YELLOW}Downloading sing-box v${SINGBOX_VERSION} (fork) for ${SINGBOX_ARCH}...${NC}"
 if ! curl -fsSL "$SINGBOX_URL" -o /usr/local/bin/sing-box; then
     echo -e "${RED}Failed to download sing-box from ${SINGBOX_URL}${NC}"
-    echo -e "${YELLOW}Falling back to source compilation...${NC}"
+    echo -e "${YELLOW}Falling back to source compilation (antsbtw fork w/ hot-reload)...${NC}"
 
-    # 备用方案：从源码编译
+    # 备用方案：从 fork 源码编译（必须 clone fork 而非 SagerNet 官方——
+    # 官方版无热更端点，agent 调 127.0.0.1:10086/hotreload/users 全 404，且 hot_reload 块 check 失败）。
+    # fork 的 go.mod 需 go 1.24+；用 1.25 工具链编译（向下兼容）。
+    GO_VERSION="1.25.0"
+    rm -rf /usr/local/go
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz
+    tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
+    export PATH=$PATH:/usr/local/go/bin
     cd /tmp
     rm -rf sing-box-src
-    git clone --depth 1 --branch "v${SINGBOX_VERSION}" https://github.com/SagerNet/sing-box.git sing-box-src
+    git clone --depth 1 --branch "$SINGBOX_FORK_BRANCH" https://github.com/antsbtw/sing-box.git sing-box-src
     cd sing-box-src
-    if ! go build -tags "with_v2ray_api,with_utls,with_reality_server,with_quic" -o sing-box ./cmd/sing-box; then
+    if ! go build -tags "with_v2ray_api,with_clash_api,with_quic,with_utls" -o sing-box ./cmd/sing-box; then
         echo -e "${RED}Failed to build sing-box${NC}"
         cd /tmp && rm -rf sing-box-src
         exit 1
