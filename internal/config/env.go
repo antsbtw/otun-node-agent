@@ -33,6 +33,9 @@ func LoadFromEnv() *AgentConfig {
 		ManagementMode: mode,
 		ServerIP:       getEnv("SERVER_IP", ""),            // 服务器公网 IP，用于生成连接 URL
 		TLSServiceKey:  getEnv("TLS_SERVICE_API_KEY", ""),  // TLS 服务 API Key (用于拉取证书)
+		// 热更（WP-C）：默认值对齐 generator 生成的 hot_reload 块，正常无需配置。
+		HotReloadAddr:   getEnv("HOT_RELOAD_ADDR", HotReloadAddr),
+		VLESSInboundTag: getEnv("VLESS_INBOUND_TAG", VLESSInboundTag),
 	}
 }
 

@@ -29,6 +29,7 @@ type Agent struct {
 	generator  *config.Generator
 	manager    *singbox.Manager
 	connMgr    *singbox.ConnectionManager
+	hotReload  *singbox.HotReloadClient // WP-C：仅用户集变时走它（不 reload、不断连）
 	monitor    *quota.Monitor
 	collector  *stats.Collector
 	reporter   *stats.Reporter
@@ -41,8 +42,11 @@ type Agent struct {
 	multiProto *MultiProtocolContext
 	dataDir    string // 数据目录路径
 
-	currentVersion string
-	mu             sync.RWMutex
+	currentVersion     string
+	currentUserVersion string              // WP-C：上次下发的 user_version（双 version 分流用）
+	currentParamVersion string             // WP-C：上次下发的 param_version
+	currentUserSet     map[string]struct{} // WP-C：上次在线的 uuid 集，用于热更后算"被删用户"主动踢
+	mu                 sync.RWMutex
 }
 
 func main() {
@@ -119,6 +123,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 	generator := config.NewGenerator(cfg.VLESSPort, ssPort, secrets.PrivateKey, secrets.ShortIDs)
 	manager := singbox.NewManager(cfg.SingboxBin, cfg.SingboxConfig)
 	connMgr := singbox.NewConnectionManager(singboxAPIAddr)
+	hotReload := singbox.NewHotReloadClient(cfg.HotReloadAddr)
 	collector := stats.NewCollector(singboxAPIAddr)
 	reporter := stats.NewReporter(cfg.APIURL, cfg.NodeAPIKey, statsCache)
 
@@ -130,6 +135,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 		generator: generator,
 		manager:   manager,
 		connMgr:   connMgr,
+		hotReload: hotReload,
 		collector: collector,
 		reporter:  reporter,
 		dataDir:   dataDir,
@@ -466,29 +472,81 @@ func (a *Agent) syncAndApplyHybrid() error {
 	log.Printf("Merged users: %d remote + %d local = %d total",
 		len(resp.Users), len(localUsers), len(users))
 
-	// 更新限额监控
-	a.monitor.UpdateUsers(users)
-
-	// 缓存远程用户
-	if err := a.cache.SaveUsers(resp); err != nil {
-		log.Printf("Failed to cache users: %v", err)
-	}
-
-	// 检查熔断状态（混合模式下也检查本地熔断）
+	// 检查熔断状态（混合模式下也检查本地熔断）。
+	// 熔断开启时所有用户被禁 → 这是"结构性变更"，必须 reload（不能热更，否则认证集与盘上不一致）。
 	circuitBreakerEnabled := false
 	if a.localStore != nil {
 		circuitBreakerEnabled = a.localStore.IsCircuitBreakerEnabled()
 	}
 
-	// 生成配置
-	singboxCfg := a.generator.Generate(users, resp.Config.RealitySNI, circuitBreakerEnabled)
+	// WP-C：本地用户合并参与最终用户集，故热更/reload 的判定与应用都基于合并后的 users。
+	//   熔断开启 → 强制 reload（applyHybrid 内部不识别熔断，这里直接走 reload 分支）。
+	if !circuitBreakerEnabled {
+		a.mu.RLock()
+		prev := a.snapshotState()
+		a.mu.RUnlock()
 
+		switch decideSyncAction(prev, resp) {
+		case actionNone:
+			log.Printf("Configuration unchanged (version: %s)", resp.Version)
+			return nil
+		case actionHotReload:
+			log.Printf("User set changed (user_version: %s) → hot-reload (hybrid)", resp.UserVersion)
+			return a.applyHybridReload(resp, users, circuitBreakerEnabled, true)
+		default: // actionReload
+			log.Printf("New configuration version: %s → reload (hybrid)", resp.Version)
+			return a.applyHybridReload(resp, users, circuitBreakerEnabled, false)
+		}
+	}
+
+	return a.applyHybridReload(resp, users, circuitBreakerEnabled, false)
+}
+
+// applyHybridReload 是 hybrid 模式的应用路径：合并用户集 + 熔断态 → 写盘 + 热更或 reload。
+// hybrid 用基础 generator（带熔断参数），故不复用 syncAndApply 的 writeConfig（后者走 multiProto）。
+// hot=true 且 sing-box 在跑 → 走热更端点（失败降级回 reload）；否则整进程 reload。
+func (a *Agent) applyHybridReload(resp *config.UsersResponse, users []config.User, circuitBreakerEnabled, hot bool) error {
+	a.monitor.UpdateUsers(users)
+
+	if err := a.cache.SaveUsers(resp); err != nil {
+		log.Printf("Failed to cache users: %v", err)
+	}
+
+	singboxCfg := a.generator.Generate(users, resp.Config.RealitySNI, circuitBreakerEnabled)
 	if err := a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig); err != nil {
 		return err
 	}
 
+	uuids := enabledUUIDs(users)
+
+	// 热更分支：sing-box 在跑且决策为热更 → 推全量集，失败降级 reload。
+	if hot && a.manager.IsRunning() {
+		removed := a.diffRemovedUsers(uuids)
+		hrResp, err := a.hotReload.UpdateUsers(uuids)
+		if err != nil {
+			log.Printf("Hot-reload endpoint failed (%v) → FALL BACK TO RELOAD (drops connections)", err)
+			// 落入下方 reload 分支。
+		} else {
+			a.mu.Lock()
+			a.currentVersion = resp.Version
+			a.currentUserVersion = resp.UserVersion
+			a.currentParamVersion = resp.ParamVersion
+			a.currentUserSet = uuidSet(uuids)
+			a.mu.Unlock()
+			if len(removed) > 0 {
+				log.Printf("Hot-reload (hybrid): %d user(s) removed, kicking: %v", len(removed), removed)
+				a.kickUsers(removed)
+			}
+			log.Printf("Hot-reload OK (hybrid): %d users live, billing_sync=%v", hrResp.UserCount, hrResp.BillingSync)
+			return nil
+		}
+	}
+
 	a.mu.Lock()
 	a.currentVersion = resp.Version
+	a.currentUserVersion = resp.UserVersion
+	a.currentParamVersion = resp.ParamVersion
+	a.currentUserSet = uuidSet(uuids)
 	a.mu.Unlock()
 
 	if a.manager.IsRunning() {
@@ -662,7 +720,9 @@ func (a *Agent) kickUsers(uuids []string) {
 	}
 }
 
-// syncAndApply 同步配置并应用
+// syncAndApply 同步配置并应用（纯远程模式）。
+//
+// WP-C：按 decideSyncAction 分流——仅用户集变 → 热更（不断连）；节点参数变/首次/老 manager → reload。
 func (a *Agent) syncAndApply() error {
 	log.Println("Syncing configuration...")
 
@@ -672,38 +732,40 @@ func (a *Agent) syncAndApply() error {
 	}
 
 	a.mu.RLock()
-	sameVersion := a.currentVersion == resp.Version
+	prev := a.snapshotState()
 	a.mu.RUnlock()
 
-	if sameVersion {
+	switch decideSyncAction(prev, resp) {
+	case actionNone:
 		log.Printf("Configuration unchanged (version: %s)", resp.Version)
 		return nil
+	case actionHotReload:
+		log.Printf("User set changed (user_version: %s, %d users) → hot-reload", resp.UserVersion, len(resp.Users))
+		return a.applyHotReload(resp, resp.Users)
+	default: // actionReload
+		log.Printf("New configuration version: %s (%d users) → reload", resp.Version, len(resp.Users))
+		return a.applyReload(resp, resp.Users)
 	}
+}
 
-	log.Printf("New configuration version: %s (%d users)", resp.Version, len(resp.Users))
-
-	a.monitor.UpdateUsers(resp.Users)
+// applyReload 写配置 + 缓存 + 整进程 reload（参数变 / 首次 / 老 manager 兜底 / 热更失败降级）。
+// users 是最终生效的用户集（远程或合并后），与 syncAndApply/syncAndApplyHybrid 各自传入。
+func (a *Agent) applyReload(resp *config.UsersResponse, users []config.User) error {
+	a.monitor.UpdateUsers(users)
 
 	if err := a.cache.SaveUsers(resp); err != nil {
 		log.Printf("Failed to cache users: %v", err)
 	}
 
-	// 根据是否有多协议上下文选择不同的生成器
-	if a.multiProto != nil {
-		// 多协议模式：使用多协议生成器
-		if err := a.generateMultiProtocolConfig(a.multiProto, resp.Users, false); err != nil {
-			return err
-		}
-	} else {
-		// 标准模式：使用基础生成器
-		singboxCfg := a.generator.Generate(resp.Users, resp.Config.RealitySNI, false)
-		if err := a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig); err != nil {
-			return err
-		}
+	if err := a.writeConfig(resp, users); err != nil {
+		return err
 	}
 
 	a.mu.Lock()
 	a.currentVersion = resp.Version
+	a.currentUserVersion = resp.UserVersion
+	a.currentParamVersion = resp.ParamVersion
+	a.currentUserSet = uuidSet(enabledUUIDs(users))
 	a.mu.Unlock()
 
 	if a.manager.IsRunning() {
@@ -712,6 +774,155 @@ func (a *Agent) syncAndApply() error {
 	}
 
 	return nil
+}
+
+// applyHotReload 仅用户集变：把全量 uuid 集推给运行中的 sing-box（不 reload、不断连）。
+// 仍同步缓存 + 限额视图 + 盘上配置（防 sing-box 崩溃重启后从旧盘配置恢复丢新用户——热更只改内存）。
+// 任一前提不满足或端点调用失败 → 降级回 applyReload，保证最终一致（三重兜底）。
+func (a *Agent) applyHotReload(resp *config.UsersResponse, users []config.User) error {
+	// 兜底1：sing-box 未运行 → 没有进程可热更，退回 reload 路径（其内部 IsRunning=false 时只写盘）。
+	if !a.manager.IsRunning() {
+		log.Println("Hot-reload requested but sing-box not running → fall back to reload (write config only)")
+		return a.applyReload(resp, users)
+	}
+
+	a.monitor.UpdateUsers(users)
+
+	// 兜底2：盘上配置必须随热更同步（防崩溃重启丢新用户）。写失败则不热更，退回 reload。
+	if err := a.writeConfig(resp, users); err != nil {
+		log.Printf("Hot-reload: failed to persist config to disk (%v) → fall back to reload", err)
+		return a.applyReload(resp, users)
+	}
+
+	// 推全量 user 集（仅 enabled，对齐 generator 的 inbound users 过滤）。
+	uuids := enabledUUIDs(users)
+
+	// 算"本次掉出集合"的用户（删除/禁用）——热更只移除其认证，已建连接不会自动断，需主动踢。
+	removed := a.diffRemovedUsers(uuids)
+
+	hrResp, err := a.hotReload.UpdateUsers(uuids)
+	if err != nil {
+		// 兜底3：端点拒绝/非 200/老二进制 (v1.10.7) 无端点 → 降级回 reload + 醒目日志。
+		log.Printf("Hot-reload endpoint failed (%v) → FALL BACK TO RELOAD (drops connections)", err)
+		return a.applyReload(resp, users)
+	}
+
+	// 热更成功：同步缓存 + version 快照。
+	if err := a.cache.SaveUsers(resp); err != nil {
+		log.Printf("Failed to cache users: %v", err)
+	}
+	a.mu.Lock()
+	a.currentVersion = resp.Version
+	a.currentUserVersion = resp.UserVersion
+	a.currentParamVersion = resp.ParamVersion
+	a.currentUserSet = uuidSet(uuids)
+	a.mu.Unlock()
+
+	// 被删用户的现有连接不会因热更自动断 → 主动踢（不影响其他在线用户）。
+	if len(removed) > 0 {
+		log.Printf("Hot-reload: %d user(s) removed, kicking their live connections: %v", len(removed), removed)
+		a.kickUsers(removed)
+	}
+
+	log.Printf("Hot-reload OK: %d users live, billing_sync=%v (no connections dropped)", hrResp.UserCount, hrResp.BillingSync)
+	return nil
+}
+
+// writeConfig 按是否有多协议上下文选择生成器写盘（reload/hot-reload 共用，避免逻辑漂移）。
+func (a *Agent) writeConfig(resp *config.UsersResponse, users []config.User) error {
+	if a.multiProto != nil {
+		return a.generateMultiProtocolConfig(a.multiProto, users, false)
+	}
+	singboxCfg := a.generator.Generate(users, resp.Config.RealitySNI, false)
+	return a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig)
+}
+
+// syncAction 是同步路径的决策结果。
+type syncAction int
+
+const (
+	actionNone      syncAction = iota // 配置无变化，不动
+	actionHotReload                   // 仅用户集变 → 热更（不断连）
+	actionReload                      // 参数变 / 首次 / 老 manager 兜底 → 整进程 reload
+)
+
+// syncState 是 agent 本地缓存的上一次下发的版本快照（决策输入，纯数据便于测试）。
+type syncState struct {
+	version      string
+	userVersion  string
+	paramVersion string
+}
+
+// snapshotState 取当前 version 快照（调用方持锁）。
+func (a *Agent) snapshotState() syncState {
+	return syncState{
+		version:      a.currentVersion,
+		userVersion:  a.currentUserVersion,
+		paramVersion: a.currentParamVersion,
+	}
+}
+
+// decideSyncAction 纯决策：对比本地缓存版本与新响应，决定走 reload / 热更 / 不动。
+// 抽成纯函数便于单测（不依赖 sing-box 进程、syncer、缓存）。
+//
+//   - 双 version 缺失（当前 otun-manager 标准分支只下发顶层 version）→ 退回顶层 version 判定，
+//     变则一律 reload（安全侧，行为同今天）。要走热更需 manager 侧补 user_version/param_version。
+//   - param_version 变（协议/Reality/端口/证书等）→ reload（inbound 重建无法热更）。
+//   - 仅 user_version 变（param_version 不变）→ 热更。
+//   - 都不变 → 不动。
+func decideSyncAction(prev syncState, resp *config.UsersResponse) syncAction {
+	dualVersion := resp.UserVersion != "" && resp.ParamVersion != ""
+
+	if !dualVersion {
+		if prev.version == resp.Version {
+			return actionNone
+		}
+		return actionReload
+	}
+
+	if prev.paramVersion != resp.ParamVersion {
+		return actionReload
+	}
+	if prev.userVersion != resp.UserVersion {
+		return actionHotReload
+	}
+	return actionNone
+}
+
+// diffRemovedUsers 返回"上次在集合、本次不在"的 UUID（删除/禁用的用户），供热更后主动踢连接。
+func (a *Agent) diffRemovedUsers(newUUIDs []string) []string {
+	next := uuidSet(newUUIDs)
+	a.mu.RLock()
+	prev := a.currentUserSet
+	a.mu.RUnlock()
+
+	var removed []string
+	for uuid := range prev {
+		if _, ok := next[uuid]; !ok {
+			removed = append(removed, uuid)
+		}
+	}
+	return removed
+}
+
+// uuidSet 把 UUID 切片转成集合。
+func uuidSet(uuids []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(uuids))
+	for _, u := range uuids {
+		set[u] = struct{}{}
+	}
+	return set
+}
+
+// enabledUUIDs 提取启用用户的 UUID 列表（对齐 generator 的 inbound users 过滤：仅 Enabled）。
+func enabledUUIDs(users []config.User) []string {
+	uuids := make([]string, 0, len(users))
+	for _, u := range users {
+		if u.Enabled {
+			uuids = append(uuids, u.UUID)
+		}
+	}
+	return uuids
 }
 
 // applyFromCache 从缓存应用配置
