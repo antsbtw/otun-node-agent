@@ -247,9 +247,6 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 
 	// V2Ray API for stats (gRPC)
 	// 必须同时配置 inbounds 和 users 才能正常统计用户流量
-	// hot_reload: WP-C 本地热更端点（回环，仅本机 agent 调，绝不外暴露）。
-	//   只绑 VLESS inbound（vless-in）—— 最小治本路径只热更 VLESS，其余协议变更走 reload。
-	//   老二进制 (v1.10.7) 不识别此块会 check 失败 —— 切 fork (WP-D) 前不要部署本配置。
 	config["experimental"] = map[string]any{
 		"v2ray_api": map[string]any{
 			"listen": "127.0.0.1:10085",
@@ -258,10 +255,6 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 				"inbounds": statsInbounds,
 				"users":    statsUsers,
 			},
-		},
-		"hot_reload": map[string]any{
-			"listen":      HotReloadAddr,
-			"inbound_tag": VLESSInboundTag,
 		},
 	}
 
