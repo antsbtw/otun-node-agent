@@ -147,7 +147,13 @@ echo -e "${GREEN}Go installed: $(go version)${NC}"
 # ★WP-D：sing-box 源已从官方 v1.10.7 切到 antsbtw/sing-box fork（分支 realm-hot-reload，
 #   含 WP-A hy2 运行时热更端点）。WP-C 的 generator 无条件给 config 加 hot_reload 块，
 #   官方 sing-box 不认该块会 config check 失败、起不来——必须装 fork 与 agent 配套。
-#   复用 realm-agent 已验证的现成 fork release（东京/新加坡即从此 URL 拉取，含 WP-A，Revision c7939525）。
+#   复用 realm-agent 已验证的现成 fork release（东京/新加坡即从此 URL 拉取）。
+# ★flowfix（2026-06-26，fork commit 41691daa，已重新构建并发布到下方同名 release tag）：
+#   WP-A 的 vless 热更把 flow 设计成 inbound 级单值 h.flow（取 users[0].Flow）。agent 在尚未
+#   拉到用户时会用空 users:[] 启动 sing-box → h.flow 永久为 "" → 之后热更进来的所有用户 flow
+#   全空 → 与客户端 xtls-rprx-vision 不匹配 → 所有【新】握手 EOF / Reality invalid（旧连接已
+#   缓存 auth 不受影响，故"有人能连、新连全挂"）。修复：h.flow 为空时兜底 xtls-rprx-vision。
+#   tag 名不变（修复版二进制已覆盖发布到 singbox-v1.14.0-alpha.25），重装即拉到修复版。
 echo -e "${GREEN}Downloading sing-box (v2ray_api + hot-reload fork)...${NC}"
 
 # sing-box fork 版本和预编译二进制下载地址
