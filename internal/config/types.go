@@ -18,6 +18,10 @@ const (
 	// trojan name==password==UUID（generator 即如此生成），与热更端点 UpdateUsers(uuids,uuids) 契约一致。
 	// 占实际流量最大头（~43%）。同 hy2，条件生成（需 TLS 证书），只在真生成时加进 inbound_tags。
 	TrojanInboundTag = "trojan-in"
+	// VMessInboundTag 是标准节点 VMess inbound 的 tag（generator_multi 用 "vmess-in"）。
+	// otun vmess 用户 name=uuid、alterId=0（现代 AEAD），与热更端点 UpdateUsers(uuids,uuids) 契约一致。
+	// 占实际流量 ~8%。条件生成（需 TLS 证书），只在真生成时加进 inbound_tags。
+	VMessInboundTag = "vmess-in"
 )
 
 // ManagementMode 管理模式

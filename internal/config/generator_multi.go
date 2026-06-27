@@ -246,14 +246,14 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 	}
 
 	// hot_reload: WP-C 本地热更端点（回环，仅本机 agent 调，绝不外暴露）。
-	//   绑 VLESS + Hysteria2 + Trojan inbound —— 三者均 name==password==UUID 语义（generator 即如此生成），
-	//   与热更端点 UpdateUsers(uuids,uuids) 契约一致，覆盖实际流量绝大头（trojan~43% + hy2~36% + vless~7% ≈ 86%）。
-	//   其余协议（ss PSK 语义不同、vmess/tuic fork 未实现 UpdateUsers）变更仍走 reload。
-	//   只把"实际生成了的" inbound 加进 inbound_tags（hy2/trojan 条件生成，没生成就别绑，否则端点找不到报错）。
+	//   绑 VLESS + Hysteria2 + Trojan + VMess inbound —— 均 name==password/uuid==UUID 语义（generator 即如此生成，
+	//   vmess alterId=0 现代 AEAD），与热更端点 UpdateUsers(uuids,uuids) 契约一致，覆盖实际流量
+	//   ~94%（trojan~43% + hy2~36% + vmess~8% + vless~7%）。其余协议（ss PSK 语义不同、tuic fork 未接）变更仍走 reload。
+	//   只把"实际生成了的" inbound 加进 inbound_tags（hy2/trojan/vmess 条件生成，没生成就别绑，否则端点找不到报错）。
 	//   老二进制 (v1.10.7) 不识别此块会 check 失败 —— 切 fork (WP-D) 前不要部署本配置。
-	hotReloadTags := make([]string, 0, 3)
+	hotReloadTags := make([]string, 0, 4)
 	for _, t := range statsInbounds {
-		if t == VLESSInboundTag || t == HY2InboundTag || t == TrojanInboundTag {
+		if t == VLESSInboundTag || t == HY2InboundTag || t == TrojanInboundTag || t == VMessInboundTag {
 			hotReloadTags = append(hotReloadTags, t)
 		}
 	}
