@@ -10,6 +10,10 @@ const (
 	// VLESSInboundTag 是标准节点 VLESS inbound 的 tag（两个 generator 均用 "vless-in"）。
 	// 热更端点据此定位要换认证 map 的 inbound。
 	VLESSInboundTag = "vless-in"
+	// HY2InboundTag 是标准节点 Hysteria2 inbound 的 tag（generator_multi 用 "hysteria2-in"）。
+	// hy2 与 vless 同 name==password==UUID 语义，可一并热更（占实际流量 ~36%，最大头之一）。
+	// 注意：hy2 inbound 条件生成（需 TLS 证书 + 启用 hy2），故只在它真生成时才加进 inbound_tags。
+	HY2InboundTag = "hysteria2-in"
 )
 
 // ManagementMode 管理模式

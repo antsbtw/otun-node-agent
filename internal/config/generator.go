@@ -139,8 +139,8 @@ func (g *Generator) Generate(users []User, realitySNI string, circuitBreakerEnab
 			},
 		},
 		"hot_reload": map[string]any{
-			"listen":      HotReloadAddr,
-			"inbound_tag": VLESSInboundTag,
+			"listen":       HotReloadAddr,
+			"inbound_tags": []string{VLESSInboundTag},
 		},
 	}
 
