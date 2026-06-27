@@ -14,6 +14,10 @@ const (
 	// hy2 与 vless 同 name==password==UUID 语义，可一并热更（占实际流量 ~36%，最大头之一）。
 	// 注意：hy2 inbound 条件生成（需 TLS 证书 + 启用 hy2），故只在它真生成时才加进 inbound_tags。
 	HY2InboundTag = "hysteria2-in"
+	// TrojanInboundTag 是标准节点 Trojan inbound 的 tag（generator_multi 用 "trojan-in"）。
+	// trojan name==password==UUID（generator 即如此生成），与热更端点 UpdateUsers(uuids,uuids) 契约一致。
+	// 占实际流量最大头（~43%）。同 hy2，条件生成（需 TLS 证书），只在真生成时加进 inbound_tags。
+	TrojanInboundTag = "trojan-in"
 )
 
 // ManagementMode 管理模式
