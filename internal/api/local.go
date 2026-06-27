@@ -332,7 +332,7 @@ func (s *LocalAPIServer) generateVLESSUrl(u *local.LocalUser) string {
 	params.Set("encryption", "none")
 	params.Set("flow", "xtls-rprx-vision")
 	params.Set("security", "reality")
-	params.Set("sni", "www.microsoft.com") // 默认 SNI
+	params.Set("sni", "www.apple.com") // 默认 SNI(2026-06-27: microsoft.com 借壳失效,改 apple,须与 manager realitySNI 一致)
 	params.Set("fp", "chrome")
 	params.Set("pbk", s.nodeConfig.PublicKey)
 	params.Set("sid", s.nodeConfig.ShortID)

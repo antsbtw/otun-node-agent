@@ -407,7 +407,11 @@ func (a *Agent) regenerateConfig() {
 	a.monitor.UpdateUsers(users)
 
 	// 生成配置
-	singboxCfg := a.generator.Generate(users, "www.microsoft.com", circuitBreakerEnabled)
+	// 2026-06-27: Reality 借壳 SNI 从 www.microsoft.com 改为 www.apple.com
+	//   (microsoft.com 借壳 TLS 握手 isHandshakeComplete=false → VLESS 全部 REALITY invalid)。
+	//   注意:本地重生成路径(regenerateConfig)拿不到 manager 下发的 RealitySNI,故用常量;
+	//   须与 manager 端 node_handler.go 的 realitySNI 保持一致。
+	singboxCfg := a.generator.Generate(users, "www.apple.com", circuitBreakerEnabled)
 
 	if err := a.generator.WriteToFile(singboxCfg, a.cfg.SingboxConfig); err != nil {
 		log.Printf("Failed to write config: %v", err)
