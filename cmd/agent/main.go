@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -46,6 +48,7 @@ type Agent struct {
 	currentUserVersion string              // WP-C：上次下发的 user_version（双 version 分流用）
 	currentParamVersion string             // WP-C：上次下发的 param_version
 	currentUserSet     map[string]struct{} // WP-C：上次在线的 uuid 集，用于热更后算"被删用户"主动踢
+	syncNow            chan struct{}       // /sync-now 触发的立即同步（容量1,突发合并）
 	mu                 sync.RWMutex
 }
 
@@ -139,6 +142,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 		collector: collector,
 		reporter:  reporter,
 		dataDir:   dataDir,
+		syncNow:   make(chan struct{}, 1),
 	}
 
 	// 更新配置中的实际端口
@@ -234,6 +238,26 @@ func (a *Agent) startHTTPServer() {
 	})
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		healthServer.HandleReady(w, r)
+	})
+
+	// 新用户开通即时生效：manager 开通时调它,agent 立刻拉一轮 /api/node/users,
+	// 消除注册→节点认识该 UUID 之间的轮询窗口(新用户首连 unknown UUID 竞态)。
+	// 鉴权复用 NODE_API_KEY(与上行 sync 同一凭证);容量1通道合并突发,已排队则直接吸收。
+	mux.HandleFunc("/sync-now", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if a.cfg.NodeAPIKey == "" ||
+			subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.cfg.NodeAPIKey)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		select {
+		case a.syncNow <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 
 	// 注册本地 API 路由（如果启用）
@@ -354,6 +378,18 @@ func (a *Agent) runMainLoop(ctx context.Context) {
 			// 远程/混合模式的定时任务
 			if syncTicker != nil {
 				select {
+				case <-a.syncNow:
+					// /sync-now 即时触发,与定时轮询共用同一套同步逻辑
+					log.Println("Immediate sync triggered via /sync-now")
+					if a.cfg.ManagementMode == config.ModeHybrid {
+						if err := a.syncAndApplyHybrid(); err != nil {
+							log.Printf("Sync error: %v", err)
+						}
+					} else {
+						if err := a.syncAndApply(); err != nil {
+							log.Printf("Sync error: %v", err)
+						}
+					}
 				case <-syncTicker.C:
 					if a.cfg.ManagementMode == config.ModeHybrid {
 						if err := a.syncAndApplyHybrid(); err != nil {
@@ -436,8 +472,8 @@ func (a *Agent) regenerateConfig() {
 func (a *Agent) syncAndApplyHybrid() error {
 	log.Println("Syncing configuration (hybrid mode)...")
 
-	// 获取远程用户
-	resp, err := a.syncer.FetchUsers()
+	// 获取远程用户。hybrid 要与本地用户合并,304 短路会跳过合并,故不带 etag 保持全量。
+	resp, err := a.syncer.FetchUsers("")
 	if err != nil {
 		return err
 	}
@@ -729,7 +765,20 @@ func (a *Agent) kickUsers(uuids []string) {
 func (a *Agent) syncAndApply() error {
 	log.Println("Syncing configuration...")
 
-	resp, err := a.syncer.FetchUsers()
+	// If-None-Match 值与上次成功应用的双 version 绑定：apply 失败时 version 不推进,
+	// 下一轮拿到的仍是全量 200,不会被 304 卡在坏状态。
+	a.mu.RLock()
+	etag := ""
+	if a.currentUserVersion != "" && a.currentParamVersion != "" {
+		etag = a.currentUserVersion + ":" + a.currentParamVersion
+	}
+	a.mu.RUnlock()
+
+	resp, err := a.syncer.FetchUsers(etag)
+	if errors.Is(err, config.ErrNotModified) {
+		log.Printf("Configuration unchanged (304, etag: %s)", etag)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

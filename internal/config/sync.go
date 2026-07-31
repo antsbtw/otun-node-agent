@@ -3,11 +3,15 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// ErrNotModified：manager 判定配置与 If-None-Match 一致（304），本轮无需下载与应用。
+var ErrNotModified = errors.New("users not modified")
 
 // Syncer 负责从管理服务器同步用户配置
 type Syncer struct {
@@ -138,8 +142,10 @@ func (s *Syncer) ReportConnections(report *ConnectionsReport) (*HeartbeatRespons
 	return &resp, nil
 }
 
-// FetchUsers 从管理服务器获取用户列表
-func (s *Syncer) FetchUsers() (*UsersResponse, error) {
+// FetchUsers 从管理服务器获取用户列表。
+// etag 非空时带 If-None-Match（值为 user_version:param_version），manager 一致则回 304，
+// 此时返回 ErrNotModified；老 manager 忽略该头照常回 200，行为不变。
+func (s *Syncer) FetchUsers(etag string) (*UsersResponse, error) {
 	url := fmt.Sprintf("%s/api/node/users", s.apiURL)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -149,12 +155,19 @@ func (s *Syncer) FetchUsers() (*UsersResponse, error) {
 
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, ErrNotModified
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
