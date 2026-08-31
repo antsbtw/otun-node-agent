@@ -147,7 +147,7 @@ echo -e "${GREEN}Go installed: $(go version)${NC}"
 echo -e "${GREEN}Downloading pre-built sing-box with v2ray_api support...${NC}"
 
 # sing-box 版本和预编译二进制下载地址
-SINGBOX_VERSION="1.10.7"
+SINGBOX_VERSION="1.11.0-otun"
 
 # 确定架构
 case $ARCH in
