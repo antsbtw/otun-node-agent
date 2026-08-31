@@ -161,21 +161,14 @@ SINGBOX_URL="https://github.com/antsbtw/otun-node-agent/releases/download/v${SIN
 
 echo -e "${YELLOW}Downloading sing-box v${SINGBOX_VERSION} for ${SINGBOX_ARCH}...${NC}"
 if ! curl -fsSL "$SINGBOX_URL" -o /usr/local/bin/sing-box; then
+    # 不再回退编译上游 SagerNet：上游没有自研 fork 的扩展（如 experimental.hot_reload），
+    # 编出来的二进制与本项目下发的配置不是同一份契约，装上去只会换一种坏法。
+    # 宁可装机失败（可见、可重试），也不要留一台"起得来但行为不对"的节点。
     echo -e "${RED}Failed to download sing-box from ${SINGBOX_URL}${NC}"
-    echo -e "${YELLOW}Falling back to source compilation...${NC}"
-
-    # 备用方案：从源码编译
-    cd /tmp
-    rm -rf sing-box-src
-    git clone --depth 1 --branch "v${SINGBOX_VERSION}" https://github.com/SagerNet/sing-box.git sing-box-src
-    cd sing-box-src
-    if ! go build -tags "with_v2ray_api,with_utls,with_reality_server,with_quic" -o sing-box ./cmd/sing-box; then
-        echo -e "${RED}Failed to build sing-box${NC}"
-        cd /tmp && rm -rf sing-box-src
-        exit 1
-    fi
-    mv sing-box /usr/local/bin/
-    cd /tmp && rm -rf sing-box-src
+    echo -e "${RED}Aborting install. Do NOT fall back to upstream SagerNet source:${NC}"
+    echo -e "${RED}  it lacks this project's fork extensions and yields an incompatible binary.${NC}"
+    echo -e "${YELLOW}Fix the release asset (tag v${SINGBOX_VERSION}, ${SINGBOX_ARCH}) and re-run.${NC}"
+    exit 1
 fi
 
 chmod +x /usr/local/bin/sing-box
@@ -380,6 +373,53 @@ with open('$INSTALL_DIR/data/secrets.json', 'w') as f:
     json.dump(secrets, f, indent=2)
 PYTHON
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# 数据面验收：agent 活着 != 用户能连。
+#
+# 2026-08-31 事故：sing-box 因配置被拒而崩溃重启循环，但 agent 进程好好的、8080 也应答，
+# 于是装机"成功"、DB 标 active，实际 443/SS 全拒 —— 两台生产机分别烂了 1 天和 23 天。
+# 装机阶段就必须把这种机器判为失败：装机失败是可见、可重试的；静默交付一台连不上的机器不是。
+#
+# /health: 200 = agent + sing-box 都在跑；503 = agent 在但 sing-box 没起来（数据面死的）。
+#
+# ★ 只对 local 模式（OBox 托管机）生效。remote 模式（vpn/otun 标准出口节点）跳过：
+#   标准节点的用户集要等 agent 向 manager 拉一轮才有，装机当刻 sing-box 未必已就绪，
+#   这个空窗期没有实测过；而标准节点线上承载着数百个用户，宁可不加这道闸，
+#   也不能因为一个未验证的判据把本来正常的装机判失败。
+#   标准节点的同类保护另行评估（需先实测 remote 首装的 health 时序）。
+# ---------------------------------------------------------------------------
+if [ "$MANAGEMENT_MODE" != "local" ]; then
+    echo -e "${YELLOW}Skipping data-plane gate (management mode: ${MANAGEMENT_MODE}; gate applies to local/OBox only)${NC}"
+else
+echo ""
+echo -e "${GREEN}Verifying data plane...${NC}"
+
+HEALTH_OK=0
+for i in $(seq 1 6); do
+    HEALTH_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health 2>/dev/null || echo "000")
+    echo -e "  attempt ${i}/6: health=${HEALTH_CODE}"
+    if [ "$HEALTH_CODE" = "200" ]; then
+        HEALTH_OK=1
+        break
+    fi
+    sleep 5
+done
+
+if [ "$HEALTH_OK" != "1" ]; then
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}  INSTALL FAILED: data plane is down${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}Agent responds but sing-box is not running -- users could NOT connect.${NC}"
+    echo -e "${YELLOW}sing-box config check:${NC}"
+    /usr/local/bin/sing-box check -c /etc/sing-box/config.json 2>&1 | tail -5
+    echo -e "${YELLOW}Recent agent logs:${NC}"
+    journalctl -u otun-agent --no-pager -n 30 2>/dev/null | grep -iE 'sing-box|FATAL' | tail -5
+    exit 1
+fi
+
+echo -e "${GREEN}Data plane OK (sing-box running)${NC}"
 fi
 
 echo ""

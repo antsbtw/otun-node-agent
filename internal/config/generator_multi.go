@@ -260,7 +260,7 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 
 	// V2Ray API for stats (gRPC)
 	// 必须同时配置 inbounds 和 users 才能正常统计用户流量
-	config["experimental"] = map[string]any{
+	experimental := map[string]any{
 		"v2ray_api": map[string]any{
 			"listen": "127.0.0.1:10085",
 			"stats": map[string]any{
@@ -269,11 +269,18 @@ func (g *MultiProtocolGenerator) Generate(users []User, circuitBreakerEnabled bo
 				"users":    statsUsers,
 			},
 		},
-		"hot_reload": map[string]any{
+	}
+
+	// hot_reload 仅在确认节点跑带热更的 fork 时才下发（SINGBOX_HOT_RELOAD=true）。
+	// 旧二进制解析到该未知字段会 FATAL 退出 —— 详见 HotReloadSupported 注释。
+	if HotReloadSupported() {
+		experimental["hot_reload"] = map[string]any{
 			"listen":       HotReloadAddr,
 			"inbound_tags": hotReloadTags,
-		},
+		}
 	}
+
+	config["experimental"] = experimental
 
 	return config
 }

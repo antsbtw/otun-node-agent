@@ -530,6 +530,11 @@ func (a *Agent) syncAndApplyHybrid() error {
 			log.Printf("Configuration unchanged (version: %s)", resp.Version)
 			return nil
 		case actionHotReload:
+			// 同上：未开热更则不走热更分支（applyHybridReload 的 hot 参数置 false）。
+			if !config.HotReloadSupported() {
+				log.Printf("User set changed (user_version: %s) → reload (hybrid, hot-reload disabled)", resp.UserVersion)
+				return a.applyHybridReload(resp, users, circuitBreakerEnabled, false)
+			}
 			log.Printf("User set changed (user_version: %s) → hot-reload (hybrid)", resp.UserVersion)
 			return a.applyHybridReload(resp, users, circuitBreakerEnabled, true)
 		default: // actionReload
@@ -792,6 +797,12 @@ func (a *Agent) syncAndApply() error {
 		log.Printf("Configuration unchanged (version: %s)", resp.Version)
 		return nil
 	case actionHotReload:
+		// 未开热更时盘上不发 hot_reload 块、端点也不存在：直接 reload，
+		// 别每轮都去敲一个必然失败的端点（applyHotReload 内部虽有兜底，但会留噪声日志）。
+		if !config.HotReloadSupported() {
+			log.Printf("User set changed (user_version: %s, %d users) → reload (hot-reload disabled)", resp.UserVersion, len(resp.Users))
+			return a.applyReload(resp, resp.Users)
+		}
 		log.Printf("User set changed (user_version: %s, %d users) → hot-reload", resp.UserVersion, len(resp.Users))
 		return a.applyHotReload(resp, resp.Users)
 	default: // actionReload

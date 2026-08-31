@@ -58,3 +58,20 @@ func getIntEnv(key string, defaultVal int) int {
 func getDurationEnv(key string, defaultVal int) time.Duration {
 	return time.Duration(getIntEnv(key, defaultVal))
 }
+
+// HotReloadSupported 报告目标 sing-box 二进制是否认识 experimental.hot_reload 块。
+//
+// 背景（2026-08-31 生产事故）：hot_reload 是自研 fork（WP-A）才有的扩展，上游/旧二进制
+// 解析到未知字段会 **FATAL 退出**（`json: unknown field "hot_reload"`），不是忽略。
+// 而 install.sh 把 sing-box 钉死在 v1.10.7（rev 253b4193，2025-01，早于 fork 的热更实现），
+// agent 却从 releases/latest 浮动更新 —— agent 一滚版本，新装节点的 sing-box 就必然启动失败，
+// 陷入指数退避崩溃循环：8080 还活着、DB 里仍是 active，但 443/SS 全拒，付费用户一个都连不上。
+//
+// 故默认 **不发** 该块（对齐旧二进制，安全）；确认节点跑的是带热更的 fork 后，
+// 用 SINGBOX_HOT_RELOAD=true 显式打开。
+//
+// 关掉只是让用户集变更退回整进程 reload（会断连），功能不丢——agent 侧本就有三重兜底：
+// 端点不存在/调用失败一律降级回 reload。
+func HotReloadSupported() bool {
+	return os.Getenv("SINGBOX_HOT_RELOAD") == "true"
+}
