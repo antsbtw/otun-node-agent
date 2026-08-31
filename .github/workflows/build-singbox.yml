@@ -6,16 +6,25 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      singbox_version:
-        description: 'sing-box version (e.g., 1.10.7)'
+      release_version:
+        description: 'Release version tag (e.g., 1.11.0-otun)'
         required: true
-        default: '1.10.7'
+        default: '1.11.0-otun'
+      fork_ref:
+        description: 'antsbtw/sing-box commit or branch to build'
+        required: true
+        default: 'c7b011f5'
 
 permissions:
   contents: write
 
 env:
-  SINGBOX_VERSION: ${{ github.event.inputs.singbox_version || '1.10.7' }}
+  # ★ 编的是自研 fork,不是上游 SagerNet。
+  #   2026-08-31 事故根因:此前这里 clone 上游,编出的二进制不认 experimental.hot_reload,
+  #   而 agent 会下发该块 -> config decode FATAL -> sing-box 崩溃重启循环,
+  #   节点看着 active(agent 活着、8080 应答)但 443/SS 全拒,付费用户一个都连不上。
+  RELEASE_VERSION: ${{ github.event.inputs.release_version || '1.11.0-otun' }}
+  FORK_REF: ${{ github.event.inputs.fork_ref || 'c7b011f5' }}
 
 jobs:
   build:
@@ -35,18 +44,25 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
-      - name: Clone sing-box source
+      - name: Clone sing-box source (own fork, NOT upstream)
         run: |
-          git clone --depth 1 --branch "v${{ env.SINGBOX_VERSION }}" https://github.com/SagerNet/sing-box.git sing-box-src
+          git clone https://github.com/antsbtw/sing-box.git sing-box-src
+          cd sing-box-src
+          git checkout ${{ env.FORK_REF }}
+          echo "Building from $(git rev-parse HEAD)"
 
       - name: Build sing-box
         run: |
           cd sing-box-src
+          # ★ 不能带 with_reality_server:上游已把它并入 with_utls,fork 带着它编不过
+          #   ("The separate `with_reality_server` build tag has been merged into `with_utls`")。
+          # ★ 必须带 -X constant.Version 打版本号:此前发的二进制 `sing-box version` 输出 unknown,
+          #   排查时无法判断节点装的是哪个内核,只能去比 git revision。
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -tags "with_v2ray_api,with_utls,with_reality_server" \
-            -ldflags "-s -w" \
+            go build -tags "with_v2ray_api,with_utls,with_quic" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${{ env.RELEASE_VERSION }}' -s -w" \
             -o ../sing-box-${{ matrix.goos }}-${{ matrix.goarch }} \
             ./cmd/sing-box
 
@@ -77,12 +93,19 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ env.SINGBOX_VERSION }}
-          name: sing-box v${{ env.SINGBOX_VERSION }} (with v2ray_api)
+          tag_name: v${{ env.RELEASE_VERSION }}
+          name: sing-box v${{ env.RELEASE_VERSION }} (otun fork)
           body: |
-            Pre-built sing-box binaries with the following features enabled:
+            Pre-built sing-box binaries from **antsbtw/sing-box** (own fork, ref `${{ env.FORK_REF }}`).
+
+            Features:
             - `with_v2ray_api`: Traffic statistics support
-            - `with_utls`: Reality protocol support
+            - `with_utls`: Reality protocol support (includes reality_server)
+            - `with_quic`: Hysteria2 / TUIC support
+            - `experimental.hot_reload`: fork-only, lossless user-set reload
+
+            NOTE: upstream SagerNet builds do NOT understand `experimental.hot_reload`
+            and will exit with FATAL when the agent emits it.
 
             ## Downloads
             - `sing-box-linux-amd64` - For x86_64 servers
